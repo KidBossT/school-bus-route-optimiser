@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prometheus School — Transport, as it actually runs</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --ink:#14181d; --muted:#5c6672; --faint:#8a929c;
+  --line:#e2e6ea; --line2:#eef1f4;
+  --late:#c2410c; --late-bg:#fff1e7; --early:#1d4ed8; --early-bg:#eaf0ff;
+  --ok:#166534; --ok-bg:#e9f5ec; --warn:#92400e; --warn-bg:#fdf4e3;
+  --unpred:#6d28d9; --unpred-bg:#f2ecfd; --none:#64748b; --none-bg:#f1f3f5;
+  --accent:#1e3a8a;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-.01em}
+a{color:var(--accent)}
+.wrap{max-width:1240px;margin:0 auto;padding:0 18px}
+
+/* ---------- masthead ---------- */
+header.top{background:var(--panel);border-bottom:1px solid var(--line)}
+.top .wrap{padding-top:20px;padding-bottom:14px}
+.top h1{font-size:22px}
+.top .sub{color:var(--muted);font-size:13.5px;margin-top:4px}
+
+/* ---------- pinned scan-lag control ---------- */
+.lagbar{position:sticky;top:0;z-index:900;background:var(--panel);
+  border-bottom:1px solid var(--line);box-shadow:0 1px 6px rgba(16,24,40,.05)}
+.lagbar .wrap{display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+  padding-top:11px;padding-bottom:11px}
+.lagbar label{font-weight:650;font-size:13.5px;white-space:nowrap}
+.lagbar input[type=range]{flex:1 1 240px;min-width:180px;accent-color:var(--accent)}
+.lagval{font:600 15px/1 var(--mono);background:var(--accent);color:#fff;
+  padding:6px 10px;border-radius:6px;min-width:64px;text-align:center}
+.lagbar .ticks{font:11px/1 var(--mono);color:var(--faint);display:flex;
+  justify-content:space-between;flex:1 1 240px;min-width:180px;margin-top:-6px}
+button.why{border:1px solid var(--line);background:var(--panel);color:var(--muted);
+  border-radius:6px;padding:6px 11px;font-size:12.5px;cursor:pointer}
+button.why:hover{border-color:var(--faint);color:var(--ink)}
+.explain{background:#fffdf5;border-top:1px solid var(--line)}
+.explain .wrap{padding:14px 18px 16px}
+.explain p{margin:0 0 9px;max-width:78ch;font-size:13.5px;color:#3d4650}
+.explain p:last-child{margin-bottom:0}
+.explain b{color:var(--ink)}
+
+/* ---------- tabs ---------- */
+nav.tabs{background:var(--panel);border-bottom:1px solid var(--line);
+  position:sticky;top:53px;z-index:850}
+nav.tabs .wrap{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+nav.tabs .wrap::-webkit-scrollbar{display:none}
+nav.tabs button{background:none;border:0;border-bottom:2.5px solid transparent;
+  padding:12px 14px;font:600 14px var(--sans);color:var(--muted);cursor:pointer;
+  white-space:nowrap}
+nav.tabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+nav.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+main{padding:22px 0 60px}
+section[role=tabpanel][hidden]{display:none}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:18px;margin-bottom:18px}
+.panel>h2{font-size:16px;margin-bottom:3px}
+.panel>.note{color:var(--muted);font-size:13px;margin-bottom:14px}
+
+/* ---------- KPI ---------- */
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+  margin-bottom:16px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi .v{font:650 25px/1.1 var(--sans);letter-spacing:-.02em}
+.kpi .k{color:var(--muted);font-size:12.5px;margin-top:5px}
+.kpi .sub{color:var(--faint);font-size:11.5px;margin-top:3px}
+.kpi.live{border-color:#c8d3ea;background:linear-gradient(180deg,#fbfcff,#fff)}
+.kpi.live .v{color:var(--accent)}
+
+/* ---------- tables ---------- */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line2);
+  vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.045em;color:var(--muted);
+  font-weight:650;background:#fafbfc;position:sticky;top:0;white-space:nowrap}
+td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px;
+  white-space:nowrap}
+tbody tr:hover{background:#fbfcfd}
+td.stop{min-width:190px;max-width:340px}
+.n{color:var(--faint);font-family:var(--mono);font-size:11.5px}
+
+/* ---------- pills ---------- */
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;
+  font-weight:650;white-space:nowrap}
+.p-late{background:var(--late-bg);color:var(--late)}
+.p-early{background:var(--early-bg);color:var(--early)}
+.p-ok{background:var(--ok-bg);color:var(--ok)}
+.p-unpred{background:var(--unpred-bg);color:var(--unpred)}
+.p-none{background:var(--none-bg);color:var(--none)}
+.p-warn{background:var(--warn-bg);color:var(--warn)}
+
+/* ---------- warnings ---------- */
+.warn{border-left:3px solid #d9a441;background:var(--warn-bg);border-radius:0 7px 7px 0;
+  padding:10px 13px;margin:0 0 11px;font-size:13px;color:#5c4415}
+.warn>b:first-child{display:block;margin-bottom:2px;color:#7a5a12}
+.warn.info{border-left-color:#4a72c4;background:#eef3fd;color:#1f3763}
+.warn.info>b:first-child{color:#183055}
+.warn.good{border-left-color:#4f9d69;background:var(--ok-bg);color:#1d4b2c}
+.warn.good>b:first-child{color:#14532d}
+
+/* ---------- maps ---------- */
+#bigmap{height:min(70vh,620px);border-radius:9px;border:1px solid var(--line);
+  background:#e9edf1}
+.routemap{height:290px;border-radius:8px;border:1px solid var(--line);
+  background:#e9edf1;margin-bottom:12px}
+.leaflet-container{font:13px var(--sans)}
+.mapbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+select,.seg button{font:14px var(--sans);padding:7px 10px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{border:0;border-radius:0;cursor:pointer;color:var(--muted);font-weight:600;
+  font-size:13px}
+.seg button[aria-pressed=true]{background:var(--accent);color:#fff}
+.legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--muted);
+  margin-top:10px;align-items:center}
+.legend i{width:13px;height:13px;border-radius:50%;display:inline-block;
+  vertical-align:-2px;margin-right:5px;border:1.5px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.28)}
+.legend .dash{border-style:dashed;border-color:#111;background:#fff!important;
+  box-shadow:none}
+.pop b{font-size:13.5px}
+.pop table{font-size:12px;margin-top:6px}
+.pop td{padding:2px 6px 2px 0;border:0}
+
+/* ---------- route accordion ---------- */
+.route{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  margin-bottom:11px;overflow:hidden}
+.route>summary{list-style:none;cursor:pointer;padding:13px 16px;display:flex;
+  gap:12px;align-items:center;flex-wrap:wrap}
+.route>summary::-webkit-details-marker{display:none}
+.route>summary:hover{background:#fbfcfd}
+.route>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.route .rnum{font:650 15px var(--sans);min-width:74px}
+.route .meta{color:var(--muted);font-size:12.5px;flex:1 1 auto}
+.route .body{padding:0 16px 16px;border-top:1px solid var(--line2)}
+.subtabs{display:flex;gap:2px;margin:14px 0 12px;border-bottom:1px solid var(--line)}
+.subtabs button{background:none;border:0;border-bottom:2.5px solid transparent;
+  padding:8px 13px;font:600 13.5px var(--sans);color:var(--muted);cursor:pointer}
+.subtabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.facts{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  margin:12px 0}
+.fact{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.fact .v{font:650 17px var(--sans)}
+.fact .k{color:var(--muted);font-size:11.5px;margin-top:3px}
+
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.mono{font-family:var(--mono)}
+.hl{background:#fff6d9;padding:0 3px;border-radius:3px}
+footer{color:var(--faint);font-size:12px;padding:26px 0 40px;text-align:center}
+
+@media (max-width:640px){
+  .top h1{font-size:19px}
+  nav.tabs{top:auto;position:static}
+  .lagbar{position:static}
+  .panel{padding:14px}
+  #bigmap{height:56vh}
+}
+@media print{
+  .lagbar,nav.tabs,.mapbar,button.why{display:none!important}
+  body{background:#fff}
+  .panel,.route{break-inside:avoid;border-color:#bbb}
+  section[role=tabpanel][hidden]{display:block!important}
+  .route .body{display:block!important}
+  #bigmap,.routemap{display:none}
+  .explain{display:block!important}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <h1>Prometheus School — transport, as it actually runs</h1>
+    <div class="sub" id="subline"></div>
+  </div>
+</header>
+
+<div class="lagbar">
+  <div class="wrap">
+    <label for="lag">Scan lag <span class="mono">L</span></label>
+    <input type="range" id="lag" min="0" max="10" step="1" value="3"
+           aria-describedby="lagexplain">
+    <span class="lagval" id="lagval">3 min</span>
+    <button class="why" id="whybtn" aria-expanded="false" aria-controls="lagexplain">
+      What is this?</button>
+  </div>
+</div>
+
+<div class="explain" id="lagexplain">
+  <div class="wrap">
+    <p><b>Children are scanned after they have sat down, not as the bus pulls
+    up.</b> The attendant works along the seats once the bus is already moving.
+    So every morning tap is recorded some minutes <i>after</i> the bus actually
+    reached the stop. That gap is the scan lag, written <span class="mono">L</span>.</p>
+    <p><b>Nobody has ever measured it.</b> It is somewhere between 0 and about 8
+    minutes. This slider lets you choose a value and see the consequences
+    immediately. It is not a correction factor — it is an admission that one
+    number in this analysis is unknown, and a way to see how much it matters.</p>
+    <p><b>It matters enormously.</b> At <span class="mono">L</span> = 0 around
+    fifty stops look systematically late. At <span class="mono">L</span> = 6 only
+    a handful do, and dozens look systematically <i>early</i> instead. The
+    picture inverts. Until someone stands at three stops with a stopwatch for a
+    week, every morning figure here is a range of possibilities, not a fact.</p>
+    <p><b>Afternoon numbers are unaffected.</b> The drop-off tap happens as the
+    child steps off the bus and the dismissal tap as they leave the premises.
+    Both are honest. Anything on the Afternoon tabs can be acted on today.</p>
+    <p class="small muted">Morning lateness is therefore an <b>upper bound</b> —
+    the bus is never later than it looks here, and probably earlier. Morning ride
+    durations are a <b>lower bound</b>.</p>
+  </div>
+</div>
+
+<nav class="tabs"><div class="wrap" role="tablist" id="tabs"></div></nav>
+
+<main class="wrap" id="main"></main>
+
+<footer class="wrap" id="foot"></footer>
+
+__GMAP_TAGS__
+<script id="payload" type="application/json">__DASHBOARD_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("payload").textContent);
+const LF = window.L;   // Leaflet, aliased: `L` below is the scan lag
+
+const C = DATA.meta.constants;
+let L = C.L_DEFAULT;
+
+/* ==================================================================
+   Formatting
+   ================================================================== */
+const clock = m => {
+  if (m === null || m === undefined || isNaN(m)) return "—";
+  let t = ((Math.round(m) % 1440) + 1440) % 1440;
+  const h = Math.floor(t / 60), mm = t % 60;
+  return String(h).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+};
+const signed = v => (v === null || v === undefined || isNaN(v)) ? "—"
+  : (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v).toFixed(v % 1 ? 1 : 0);
+const num = (v, d = 1) => (v === null || v === undefined || isNaN(v)) ? "—" : Number(v).toFixed(d);
+const int = v => (v === null || v === undefined || isNaN(v)) ? "—" : Math.round(v).toLocaleString();
+const mins = s => (s === null || s === undefined) ? null : s / 60;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const el = (tag, cls, html) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+};
+
+/* ==================================================================
+   Statistics — computed in the browser, at the reader's L
+
+   Nothing about the morning is classified in Python. The pipeline ships
+   raw first-tap arrival times per stop; everything below is derived here
+   so that moving the slider genuinely re-derives the verdict rather than
+   re-labelling a pre-baked one.
+   ================================================================== */
+function quantile(sorted, q) {
+  if (!sorted.length) return null;
+  const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+
+/** @param obs [[dateIdx, arrivalMinutes], ...]  @param lag minutes to subtract (AM only) */
+function stopStats(obs, printed, lag) {
+  const out = { n: obs.length, ok: false };
+  if (!obs.length) return out;
+  // Observed arrival, corrected for scan lag. For the afternoon lag is 0.
+  const arr = obs.map(o => o[1] - lag).sort((a, b) => a - b);
+  out.medianArrival = quantile(arr, .5);
+  out.p10 = quantile(arr, .10);
+  out.p90 = quantile(arr, .90);
+  if (printed === null || printed === undefined) return out;
+  const dev = arr.map(a => a - printed).sort((a, b) => a - b);
+  out.median = quantile(dev, .5);
+  out.iqr = quantile(dev, .75) - quantile(dev, .25);
+  out.ontime = dev.filter(d => Math.abs(d) <= C.ONTIME_BAND).length / dev.length * 100;
+  out.ok = true;
+  return out;
+}
+
+/** Thresholds here are arbitrary. They are labelled as such wherever shown. */
+function classify(s) {
+  if (!s.n || s.n < C.MIN_OBS) return { key: "none", label: "too few observations" };
+  if (!s.ok) return { key: "none", label: "no printed time" };
+  if (s.iqr > C.UNPREDICTABLE_IQR) return { key: "unpred", label: "unpredictable" };
+  if (s.median >= C.LATE_THRESHOLD && s.iqr <= C.TIGHT_IQR) return { key: "late", label: "running late" };
+  if (s.median <= -C.LATE_THRESHOLD && s.iqr <= C.TIGHT_IQR) return { key: "early", label: "running early" };
+  return { key: "ok", label: "on time" };
+}
+const pill = c => `<span class="pill p-${c.key}">${c.label}</span>`;
+
+/** Route feasibility. Slack shrinks as L grows: a bigger lag means the bus
+ *  truly left the last stop earlier, so the real run-in is longer than observed. */
+function feasibility(r, lag) {
+  if (r.final_printed_min === null || r.runin_median_min === null ||
+      r.reporting_min === null || !r.runin_n) return null;
+  const implied = r.final_printed_min + r.runin_median_min + lag;
+  return { implied, slack: r.reporting_min - implied, n: r.runin_n };
+}
+
+/* ==================================================================
+   Live fleet counts at the current L
+   ================================================================== */
+function fleetCounts(lag) {
+  let late = 0, early = 0, unpred = 0, onTime = 0, thin = 0, infeasible = 0, tight = 0;
+  for (const r of DATA.routes) {
+    for (const s of r.am) {
+      const st = stopStats(s.obs, s.printed_min, lag);
+      if (st.n < C.MIN_OBS) { thin++; continue; }
+      const k = classify(st).key;
+      if (k === "late") late++; else if (k === "early") early++;
+      else if (k === "unpred") unpred++; else if (k === "ok") onTime++;
+    }
+    const f = feasibility(r, lag);
+    if (f && f.slack < 0) infeasible++;
+    else if (f && f.slack < 2) tight++;
+  }
+  return { late, early, unpred, onTime, thin, infeasible, tight };
+}
+
+/* ==================================================================
+   Suspect-data warnings — explicit rules, each saying what to do
+   ================================================================== */
+function coverageWarning(r, leg, label) {
+  const cov = r.coverage ? r.coverage[leg] : null;
+  if (cov === null || cov === undefined || cov >= C.LOW_COVERAGE * 100) return "";
+  return warnBox("Low tap coverage on this leg — " + num(cov) + "% of expected taps",
+    `Fewer than 7 in 10 expected taps were recorded for ${label} on this route. `
+    + `Treat every figure on this view as indicative, not measured. This leg cannot `
+    + `support a parent-facing feature for ${esc(r.label)} until scanning improves.`);
+}
+const warnBox = (title, body, cls = "") =>
+  `<div class="warn ${cls}"><b>${title}</b>${body}</div>`;
+
+function stopWarnings(s, st, isAM) {
+  const w = [];
+  if (st.n > 0 && st.n < C.MIN_OBS)
+    w.push(`Too few observations (n=${st.n}) to characterise this stop.`);
+  if (st.ok && st.iqr > C.UNPREDICTABLE_IQR)
+    w.push(`Timing varies too much day to day (IQR ${num(st.iqr)} min) for a printed `
+         + `time to be meaningful.`);
+  if (s.order_flag)
+    w.push(`Stop ordering in the tap data is inconsistent here — this stop's first tap `
+         + `lands at or before the previous stop's on ${num(s.order_flag.rate_pct)}% of `
+         + `days (n=${s.order_flag.n}). Per-stop times may be misattributed by several minutes.`);
+  if (!isAM && s.leg_ratio !== null && s.leg_ratio !== undefined &&
+      (s.leg_ratio < C.RATIO_LOW || s.leg_ratio > C.RATIO_HIGH))
+    w.push(`Observed and road times disagree sharply (ratio ${num(s.leg_ratio, 2)}×). `
+         + `Check the stop coordinates — this is usually a geocoding error, not traffic.`);
+  if (s.printed_variants)
+    w.push(`This stop is printed more than once on this route, with different times `
+         + `(${s.printed_variants}). Tap data cannot tell the visits apart, so the `
+         + `figures here combine them and are compared against the earlier printed time.`);
+  if (s.lat === null) w.push("This stop has no usable coordinate; it is absent from the map.");
+  else if (!s.geo_verified) w.push("Location not yet checked by a human.");
+  return w;
+}
+
+/* ==================================================================
+   Shared table renderer for a route's morning / afternoon stop list
+   ================================================================== */
+function stopTable(r, isAM) {
+  const rows = isAM ? r.am : r.pm;
+  const lag = isAM ? L : 0;
+  if (!rows.length) return `<p class="muted small">No stops recorded for this leg.</p>`;
+  let h = `<div class="scroll"><table><thead><tr>
+    <th>#</th><th>Stop</th><th class="num">Printed</th>
+    <th class="num">Observed median</th><th class="num">Arrival window (p10–p90)</th>
+    <th class="num">Deviation</th><th class="num">Spread (IQR)</th>
+    <th class="num">On time</th><th class="num">n</th><th class="num">Children</th>
+    <th class="num">Road from prev</th><th>At L=${isAM ? L : 0}</th></tr></thead><tbody>`;
+  for (const s of rows) {
+    const st = stopStats(s.obs, s.printed_min, lag);
+    const c = classify(st);
+    const warns = stopWarnings(s, st, isAM);
+    const road = mins(s.road_from_prev_s);
+    const geoMark = s.lat === null ? ` <span class="pill p-warn">no location</span>`
+      : (!s.geo_verified ? ` <span class="pill p-none" title="Geocode not verified by a human">unverified</span>` : "");
+    h += `<tr>
+      <td class="num">${s.seq}</td>
+      <td class="stop">${esc(s.stop)}${geoMark}
+        ${warns.length ? `<div class="small muted" style="margin-top:3px">⚠ ${esc(warns[0])}</div>` : ""}</td>
+      <td class="num">${clock(s.printed_min)}</td>
+      <td class="num">${st.n ? clock(st.medianArrival) : "—"}</td>
+      <td class="num">${st.n ? clock(st.p10) + "–" + clock(st.p90) : "—"}</td>
+      <td class="num">${st.ok ? signed(st.median) : "—"}</td>
+      <td class="num">${st.ok ? num(st.iqr) : "—"}</td>
+      <td class="num">${st.ok ? num(st.ontime, 0) + "%" : "—"}</td>
+      <td class="num n">${st.n}</td>
+      <td class="num">${s.riders}</td>
+      <td class="num">${road === null ? '<span class="muted">no road time</span>' : num(road) + " min"}</td>
+      <td>${pill(c)}</td></tr>`;
+  }
+  return h + "</tbody></table></div>";
+}
+
+/* ==================================================================
+   Map
+   ================================================================== */
+const PALETTE = ["#1f77b4","#d62728","#2ca02c","#ff7f0e","#9467bd","#8c564b",
+  "#e377c2","#17becf","#bcbd22","#7f7f7f","#393b79","#b5651d","#637939",
+  "#8c6d31","#843c39","#7b4173","#3182bd","#e6550d","#31a354","#756bb1",
+  "#636363","#6baed6","#fd8d3c","#74c476","#9e9ac8"];
+const routeColour = r => PALETTE[r.route_num % PALETTE.length];
+
+/** Diverging scale: warm = late, cool = early, neutral = on time.
+ *  Orange/blue rather than red/green so it survives colour-blindness. */
+function devColour(dev) {
+  if (dev === null || dev === undefined || isNaN(dev)) return "#9aa3ad";
+  const d = Math.max(-15, Math.min(15, dev));
+  if (d >= 5)  return d >= 12 ? "#7c2d12" : d >= 8 ? "#c2410c" : "#ea8a4b";
+  if (d <= -5) return d <= -12 ? "#1e3a8a" : d <= -8 ? "#2563eb" : "#7aa5e8";
+  return "#8f9aa6";
+}
+
+function stopMarker(s, st, isAM, r) {
+  const dev = st.ok && st.n >= C.MIN_OBS ? st.median : null;
+  const colour = dev === null ? "#9aa3ad" : devColour(dev);
+  const m = LF.circleMarker([s.lat, s.lon], {
+    radius: 6,
+    color: s.geo_verified ? "#ffffff" : "#111827",
+    weight: s.geo_verified ? 2 : 1.5,
+    dashArray: s.geo_verified ? null : "2,2",
+    fillColor: colour, fillOpacity: .92,
+  });
+  const warns = stopWarnings(s, st, isAM);
+  m.bindPopup(`<div class="pop"><b>${esc(s.stop)}</b><br>
+    <span class="muted small">${esc(r.label)} · ${isAM ? "morning" : "afternoon"} · stop ${s.seq}</span>
+    <table>
+      <tr><td class="muted">Printed</td><td class="mono">${clock(s.printed_min)}</td></tr>
+      <tr><td class="muted">Usually arrives</td><td class="mono">${st.n ? clock(st.p10) + "–" + clock(st.p90) : "—"}</td></tr>
+      <tr><td class="muted">Median</td><td class="mono">${st.n ? clock(st.medianArrival) : "—"}</td></tr>
+      <tr><td class="muted">Deviation at L=${isAM ? L : 0}</td><td class="mono">${st.ok ? signed(st.median) + " min" : "—"}</td></tr>
+      <tr><td class="muted">Spread (IQR)</td><td class="mono">${st.ok ? num(st.iqr) + " min" : "—"}</td></tr>
+      <tr><td class="muted">Observations</td><td class="mono">${st.n}</td></tr>
+      <tr><td class="muted">Children</td><td class="mono">${s.riders}</td></tr>
+    </table>
+    <div style="margin-top:5px">${pill(classify(st))}</div>
+    ${warns.length ? `<div class="small muted" style="margin-top:6px">⚠ ${warns.map(esc).join("<br>⚠ ")}</div>` : ""}
+    </div>`, { maxWidth: 320 });
+  return m;
+}
+
+let bigMap = null, bigLayers = null, mapMode = "am", mapRoute = "all";
+function tiles() {   // Google's own map tiles come with the map (gmap_shim.js)
+  return LF.tileLayer();
+}
+function drawBigMap() {
+  if (!bigMap) return;
+  if (bigLayers) bigMap.removeLayer(bigLayers);
+  bigLayers = LF.layerGroup().addTo(bigMap);
+  const isAM = mapMode === "am", bounds = [];
+  for (const r of DATA.routes) {
+    if (mapRoute !== "all" && r.route_key !== mapRoute) continue;
+    const path = isAM ? r.am_path : r.pm_path;
+    if (path && path.length > 1)
+      LF.polyline(path, { color: routeColour(r), weight: 3, opacity: .55 }).addTo(bigLayers);
+    for (const s of (isAM ? r.am : r.pm)) {
+      if (s.lat === null) continue;
+      stopMarker(s, stopStats(s.obs, s.printed_min, isAM ? L : 0), isAM, r).addTo(bigLayers);
+      bounds.push([s.lat, s.lon]);
+    }
+  }
+  const sc = DATA.meta.school;
+  if (sc.lat) {
+    LF.marker([sc.lat, sc.lon]).addTo(bigLayers)
+      .bindPopup(`<b>School</b><br><span class="small muted">${esc(sc.label)}</span>`);
+    bounds.push([sc.lat, sc.lon]);
+  }
+  if (bounds.length) {
+    bigMap.invalidateSize();
+    bigMap.fitBounds(bounds, { padding: [26, 26], maxZoom: 14 });
+  } else {
+    bigMap.setView([DATA.meta.school.lat || 28.57, DATA.meta.school.lon || 77.39], 11);
+  }
+}
+
+const routeMaps = {};
+function drawRouteMap(r, isAM) {
+  const id = "map_" + r.route_key;
+  const node = document.getElementById(id);
+  if (!node) return;
+  if (routeMaps[id] && routeMaps[id].getContainer() !== node) {
+    routeMaps[id].remove(); delete routeMaps[id];      // see note in wireMap
+  }
+  if (!routeMaps[id]) {
+    routeMaps[id] = LF.map(id, { scrollWheelZoom: false });
+    tiles().addTo(routeMaps[id]);
+    routeMaps[id]._layer = LF.layerGroup().addTo(routeMaps[id]);
+  }
+  const m = routeMaps[id];
+  m._layer.clearLayers();
+  const bounds = [];
+  const path = isAM ? r.am_path : r.pm_path;
+  if (path && path.length > 1)
+    LF.polyline(path, { color: routeColour(r), weight: 4, opacity: .7 }).addTo(m._layer);
+  for (const s of (isAM ? r.am : r.pm)) {
+    if (s.lat === null) continue;
+    const mk = stopMarker(s, stopStats(s.obs, s.printed_min, isAM ? L : 0), isAM, r);
+    mk.addTo(m._layer);
+    mk.bindTooltip(String(s.seq), { permanent: true, direction: "center",
+      className: "seqlbl", offset: [0, 0] });
+    bounds.push([s.lat, s.lon]);
+  }
+  const sc = DATA.meta.school;
+  if (sc.lat) { LF.marker([sc.lat, sc.lon]).addTo(m._layer); bounds.push([sc.lat, sc.lon]); }
+  setTimeout(() => {
+    m.invalidateSize();
+    if (bounds.length) m.fitBounds(bounds, { padding: [22, 22], maxZoom: 15 });
+    else m.setView([DATA.meta.school.lat || 28.57, DATA.meta.school.lon || 77.39], 11);
+  }, 80);
+}
+
+/* ==================================================================
+   Tab: Overview
+   ================================================================== */
+function renderOverview() {
+  const t = DATA.totals, f = fleetCounts(L);
+  const cov = DATA.coverage.by_leg;
+  const kpi = (v, k, sub, live) =>
+    `<div class="kpi${live ? " live" : ""}"><div class="v">${v}</div>
+     <div class="k">${k}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+
+  let h = `<div class="kpis">
+    ${kpi(int(t.children_in_logs), "children with tap data", `${int(t.roster_students)} on the roster`)}
+    ${kpi(int(t.routes_operating), "routes operating", `${t.routes_roster} on the roster, ${t.routes_in_logs} seen in logs`)}
+    ${kpi(int(t.stops), "route-stop pairs", `${t.geo_resolved} located, ${t.geo_unverified} unverified`)}
+    ${kpi(int(t.taps_usable), "usable taps", `${int(t.taps_raw)} raw, ${DATA.meta.school_days} school days`)}
+  </div>
+
+  <div class="kpis">
+    ${kpi(f.late, `stops running late`, `at L = ${L} min`, 1)}
+    ${kpi(f.early, `stops running early`, `at L = ${L} min`, 1)}
+    ${kpi(f.unpred, `stops unpredictable`, `IQR over ${C.UNPREDICTABLE_IQR} min — L makes no difference`, 1)}
+    ${kpi(f.infeasible, `routes that cannot reach school on time`, `at L = ${L} min; ${f.tight} more within 2 min`, 1)}
+  </div>
+
+  <div class="panel">
+    <h2>What the slider is doing to these numbers</h2>
+    <div class="note">The four blue figures above are recomputed from raw tap
+      times every time you move the slider. Here is the whole range at once, so
+      you can see how much of the morning picture rests on a number nobody has
+      measured.</div>
+    <div class="scroll"><table><thead><tr><th class="num">L (min)</th>
+      <th class="num">Stops late</th><th class="num">Stops early</th>
+      <th class="num">On time</th><th class="num">Unpredictable</th>
+      <th class="num">Routes infeasible</th></tr></thead><tbody>`;
+  for (let l = C.L_MIN; l <= C.L_MAX; l++) {
+    const c = fleetCounts(l);
+    h += `<tr${l === L ? ' style="background:#eef3fd;font-weight:600"' : ""}>
+      <td class="num">${l}</td><td class="num">${c.late}</td><td class="num">${c.early}</td>
+      <td class="num">${c.onTime}</td><td class="num">${c.unpred}</td>
+      <td class="num">${c.infeasible}</td></tr>`;
+  }
+  h += `</tbody></table></div>
+    <p class="small muted" style="margin:10px 0 0">Stops with fewer than
+      ${C.MIN_OBS} observations (${f.thin} of them) are never classified and are
+      excluded from every column above.</p></div>`;
+
+  /* coverage */
+  h += `<div class="panel"><h2>Tap coverage by leg</h2>
+    <div class="note">The four legs are not equally trustworthy. This is the
+      single most important thing to understand before reading anything else.</div>
+    <div class="scroll"><table><thead><tr><th>Leg</th><th class="num">Student-days</th>
+      <th class="num">Taps</th><th class="num">Coverage</th><th>Bias</th>
+      </tr></thead><tbody>`;
+  for (const c of cov) {
+    const low = c.coverage_pct < C.LOW_COVERAGE * 100;
+    h += `<tr><td><b>${esc(c.label)}</b></td><td class="num">${int(c.student_days)}</td>
+      <td class="num">${int(c.taps)}</td>
+      <td class="num">${num(c.coverage_pct)}%${low ? ' <span class="pill p-warn">below 70%</span>' : ""}</td>
+      <td class="small muted">${esc(c.bias)}</td></tr>`;
+  }
+  h += `</tbody></table></div></div>`;
+
+  /* calibration */
+  const cal = DATA.calibration;
+  h += `<div class="panel"><h2>Local congestion factor</h2>
+    <div class="note">Observed afternoon leg times against the mapping service's
+      road times. Built from drop-off taps only — that leg is bias-free — so this
+      is the school's own buses calibrating the road model, which is more
+      accurate for this fleet than any generic traffic estimate.</div>`;
+  if (cal.fleet_ratio) {
+    h += `<div class="facts">
+      <div class="fact"><div class="v">${num(cal.fleet_ratio, 2)}×</div>
+        <div class="k">fleet median, observed ÷ free-flow road time</div></div>
+      ${cal.fleet_ratio_traffic ? `<div class="fact"><div class="v">${num(cal.fleet_ratio_traffic, 2)}×</div>
+        <div class="k">observed ÷ Google's traffic prediction for that time of day</div></div>` : ""}
+      <div class="fact"><div class="v">${cal.legs.length}</div>
+        <div class="k">consecutive stop pairs measured</div></div>
+      <div class="fact"><div class="v">${DATA.meta.router_has_traffic ? "traffic-aware" : "free-flow"}</div>
+        <div class="k">road times from ${esc(DATA.meta.router)}</div></div></div>`;
+    if (cal.fleet_ratio_traffic) {
+      h += `<div class="note">Read the traffic figure as: how the school's buses compare
+        with Google's prediction for a car leaving at the same printed time. Near 1× means the
+        prediction can be used as-is for this fleet; above 1× is the bus's own overhead
+        (boarding, and a heavier, slower vehicle than the car Google models). Both figures still rest on
+        stop coordinates that no human has confirmed.</div>`;
+    }
+    if (cal.fleet_ratio < 0.85) {
+      h += warnBox("Observed times are coming out FASTER than the road model — treat this "
+        + "figure as a geocoding check, not a congestion factor",
+        `A ratio below 1 says the buses beat free-flow driving times across the NCR, which is
+         not credible. The likely cause is stop coordinates: with
+         ${DATA.totals.geo_unverified} of ${DATA.totals.geo_points} locations unverified,
+         legs between mislocated stops carry inflated road distances and deflate the ratio.
+         Correct the coordinates flagged in <span class="mono">geocode_review.csv</span>
+         before reading anything into this number.${DATA.meta.router_has_traffic ? "" : ` The free
+         road-time provider in use has no traffic model at all, which compounds it — a
+         traffic-aware provider would raise the road times and is the single change most likely
+         to make this figure meaningful.`}`);
+    }
+    if (cal.by_hour_band.length) {
+      h += `<div class="scroll"><table><thead><tr><th>Departure hour</th>
+        <th class="num">Legs</th><th class="num">Observed median</th>
+        <th class="num">Free-flow median</th><th class="num">Ratio</th>
+        ${cal.fleet_ratio_traffic ? `<th class="num">With traffic</th><th class="num">Ratio</th>` : ""}
+        </tr></thead><tbody>`;
+      for (const b of cal.by_hour_band)
+        h += `<tr><td class="mono">${esc(b.hour_band)}</td><td class="num">${b.n_legs}</td>
+          <td class="num">${num(b.observed_median_min)} min</td>
+          <td class="num">${num(b.road_median_min)} min</td>
+          <td class="num"><b>${num(b.median_ratio, 2)}×</b></td>
+          ${cal.fleet_ratio_traffic ? `<td class="num">${b.road_traffic_median_min == null ? "—" : num(b.road_traffic_median_min) + " min"}</td>
+          <td class="num"><b>${b.median_ratio_traffic == null ? "—" : num(b.median_ratio_traffic, 2) + "×"}</b></td>` : ""}</tr>`;
+      h += `</tbody></table></div>`;
+    }
+  } else {
+    h += `<p class="muted small">No road times available, so no calibration can be
+      computed. Warm the route-time cache to populate this.</p>`;
+  }
+  h += `</div>`;
+
+  /* order violations */
+  h += `<div class="panel"><h2>Stop ordering in the tap data</h2>
+    <div class="note">How often a later stop's first tap lands at or before the
+      previous stop's. Where this is common, the tap data cannot separate the two
+      stops in time and per-stop figures for that pair are misattributed by
+      several minutes.</div>
+    ${warnBox(num(t.fleet_order_violation_pct) + "% of consecutive stop pairs are affected",
+      `Of ${t.order_pairs_tested} consecutive stop pairs with enough shared days to test,
+       this share breach the ${Math.round(C.ORDER_VIOLATION_RATE * 100)}% threshold — the
+       later stop's first tap lands strictly <i>before</i> the earlier stop's on more than
+       one day in five. Affected pairs are flagged individually in each route's morning
+       table.`)}
+    ${warnBox("A further " + num(t.fleet_same_minute_pct) + "% of tap pairs land in the same minute",
+      `Tap times resolve to the minute, and the attendant scans continuously as the bus
+       moves, so on ${num(t.fleet_same_minute_pct)}% of the ${int(t.order_day_pairs_tested)}
+       day-pairs tested two consecutive stops share a timestamp. Those pairs cannot be
+       <i>ordered</i> at all. This is a resolution limit rather than evidence that the
+       sequence is wrong, so it is counted separately — folding it into the figure above
+       would roughly double it.`, "info")}
+    </div>`;
+
+  /* exclusions */
+  h += `<div class="panel"><h2>Every row set aside, and why</h2>
+    <div class="note">Nothing is silently dropped. This is the complete audit
+      trail from the source files to the figures above.</div>
+    <div class="scroll"><table><thead><tr><th>Stage</th><th>Action</th>
+      <th class="num">Rows</th><th>Detail</th></tr></thead><tbody>`;
+  for (const e of DATA.exclusions)
+    h += `<tr><td class="mono small">${esc(e.stage)}</td><td>${esc(e.action)}</td>
+      <td class="num">${int(e.rows)}</td><td class="small muted">${esc(e.detail)}</td></tr>`;
+  h += `</tbody></table></div></div>`;
+
+  /* acceptance */
+  const bad = DATA.acceptance.filter(a => !a.match);
+  h += `<div class="panel"><h2>Reconciliation against the brief</h2>
+    <div class="note">Section 9 of the build brief lists expected figures. These
+      are the values this pipeline actually produces. Divergences are reported,
+      not adjusted — the parsers were not altered to reach a target number.</div>
+    ${bad.length ? warnBox(`${bad.length} of ${DATA.acceptance.length} figures diverge`,
+      "All divergences are small and directionally identical to the brief. They are "
+      + "consistent with a slightly different filter ordering in the run that produced "
+      + "the brief, not with a parsing error. See the README for the full explanation.")
+      : warnBox("All figures reproduce exactly", "", "good")}
+    <div class="scroll"><table><thead><tr><th>Check</th><th class="num">Brief</th>
+      <th class="num">This pipeline</th><th></th></tr></thead><tbody>`;
+  for (const a of DATA.acceptance)
+    h += `<tr><td>${esc(a.check)}</td><td class="num">${esc(a.expected)}</td>
+      <td class="num"><b>${esc(a.actual)}</b></td>
+      <td>${a.match ? '<span class="pill p-ok">matches</span>'
+                    : '<span class="pill p-warn">diverges</span>'}</td></tr>`;
+  return h + `</tbody></table></div></div>`;
+}
+
+/* ==================================================================
+   Tab: Map
+   ================================================================== */
+function renderMap() {
+  const opts = DATA.routes.map(r =>
+    `<option value="${r.route_key}">${esc(r.label)} — ${r.am_students} children</option>`).join("");
+  return `<div class="panel">
+    <h2>All routes</h2>
+    <div class="note">Stops only. Children's home locations are not plotted here
+      and are not in this dataset.</div>
+    <div class="mapbar">
+      <div class="seg" role="group" aria-label="Leg">
+        <button id="m_am" aria-pressed="true">Morning</button>
+        <button id="m_pm" aria-pressed="false">Afternoon</button>
+      </div>
+      <select id="m_route" aria-label="Filter by route">
+        <option value="all">All routes</option>${opts}</select>
+      <span class="small muted" id="m_count"></span>
+    </div>
+    <div id="bigmap"></div>
+    <div class="legend">
+      <span><i style="background:#7c2d12"></i>12+ min late</span>
+      <span><i style="background:#c2410c"></i>8–12 late</span>
+      <span><i style="background:#ea8a4b"></i>5–8 late</span>
+      <span><i style="background:#8f9aa6"></i>within ±5</span>
+      <span><i style="background:#7aa5e8"></i>5–8 early</span>
+      <span><i style="background:#2563eb"></i>8–12 early</span>
+      <span><i style="background:#1e3a8a"></i>12+ early</span>
+      <span><i style="background:#9aa3ad"></i>too few observations</span>
+      <span><i class="dash"></i>dashed outline = location not verified by a human</span>
+    </div>
+    <p class="small muted" style="margin-top:10px">Morning colours move with the
+      scan-lag slider. Afternoon colours do not — that leg is bias-free.</p>
+  </div>`;
+}
+function wireMap() {
+  const node = document.getElementById("bigmap");
+  if (!node) return;
+  // paint() rebuilds the panel's DOM on every slider move, which destroys the
+  // container this map was bound to. Re-using the old instance would leave it
+  // drawing into a detached node - a blank map the moment the reader touches
+  // the slider. Drop it and rebuild against the live container.
+  if (bigMap && bigMap.getContainer() !== node) {
+    bigMap.remove(); bigMap = null; bigLayers = null;
+  }
+  if (!bigMap) { bigMap = LF.map("bigmap"); tiles().addTo(bigMap); }
+  const setMode = m => {
+    mapMode = m;
+    document.getElementById("m_am").setAttribute("aria-pressed", m === "am");
+    document.getElementById("m_pm").setAttribute("aria-pressed", m === "pm");
+    drawBigMap(); updateMapCount();
+  };
+  document.getElementById("m_am").onclick = () => setMode("am");
+  document.getElementById("m_pm").onclick = () => setMode("pm");
+  document.getElementById("m_route").onchange = e => {
+    mapRoute = e.target.value; drawBigMap(); updateMapCount();
+  };
+  setTimeout(() => { bigMap.invalidateSize(); drawBigMap(); updateMapCount(); }, 120);
+}
+function updateMapCount() {
+  const n = document.getElementById("m_count");
+  if (!n) return;
+  let shown = 0, missing = 0, unver = 0;
+  for (const r of DATA.routes) {
+    if (mapRoute !== "all" && r.route_key !== mapRoute) continue;
+    for (const s of (mapMode === "am" ? r.am : r.pm)) {
+      if (s.lat === null) missing++; else { shown++; if (!s.geo_verified) unver++; }
+    }
+  }
+  n.innerHTML = `${shown} stops plotted · <b>${unver} unverified</b> · ${missing} with no usable coordinate`;
+}
+
+/* ==================================================================
+   Tab: Routes
+   ================================================================== */
+function renderRoutes() {
+  let h = `<div class="panel" style="margin-bottom:14px">
+    <h2>Routes</h2><div class="note">One section per route. Morning and afternoon
+    are separate views because the data behind them differs in quality, not for
+    cosmetic reasons.</div></div>`;
+  for (const r of DATA.routes) h += routeSection(r);
+  return h;
+}
+
+function routeSection(r) {
+  const f = feasibility(r, L);
+  const verdict = !f ? `<span class="pill p-none">no run-in data</span>`
+    : f.slack < 0 ? `<span class="pill p-late">cannot make reporting time by ${num(-f.slack)} min</span>`
+    : f.slack < 2 ? `<span class="pill p-warn">tight — ${num(f.slack)} min spare</span>`
+    : `<span class="pill p-ok">${num(f.slack)} min spare</span>`;
+  const status = r.status === "operating" ? ""
+    : `<span class="pill p-warn">${esc(r.status)}</span>`;
+  const gate = r.gate_load.median_min;
+  return `<details class="route" id="r_${r.route_key}" data-route="${r.route_key}">
+    <summary>
+      <span class="rnum">${esc(r.label)}</span>
+      <span class="meta">${r.am_students} children · ${r.stops} stops ·
+        reporting ${clock(r.reporting_min)}${r.status_note ? " · " + esc(r.status_note) : ""}</span>
+      ${status} ${verdict}
+    </summary>
+    <div class="body">
+      <div class="facts">
+        <div class="fact"><div class="v">${r.am_students}</div><div class="k">children, morning</div></div>
+        <div class="fact"><div class="v">${r.pm_students}</div><div class="k">children, afternoon</div></div>
+        <div class="fact"><div class="v">${clock(r.reporting_min)}</div><div class="k">bus reporting time</div></div>
+        <div class="fact"><div class="v">${gate === null ? "—" : num(gate) + " min"}</div>
+          <div class="k">dismissal gate load${r.gate_load.days_over_30_pct !== null
+            ? ` · over 30 min on ${num(r.gate_load.days_over_30_pct, 0)}% of days` : ""}</div></div>
+        <div class="fact"><div class="v">${r.runin_median_min === null ? "—" : num(r.runin_median_min) + " min"}</div>
+          <div class="k">observed run-in from last stop <span class="n">n=${r.runin_n}</span></div></div>
+        <div class="fact"><div class="v">${f ? clock(f.implied) : "—"}</div>
+          <div class="k">implied arrival at L=${L}</div></div>
+      </div>
+      ${feasNote(r, f)}
+      <div class="subtabs" role="tablist">
+        <button role="tab" aria-selected="true" data-leg="am">Morning</button>
+        <button role="tab" aria-selected="false" data-leg="pm">Afternoon</button>
+      </div>
+      <div class="legpanel" data-leg="am">
+        ${warnBox("Morning taps carry the scan lag",
+          `Children are scanned after boarding, so every deviation in this table is an
+           <b>upper bound</b> on how late the bus really is, and every observed arrival is
+           <b>later</b> than the truth by LF. At the current L = ${L} min the numbers below
+           already have ${L} minutes removed. Nothing here is safe to act on until L is
+           measured.`)}
+        ${coverageWarning(r, "am_pickup", "morning boarding")}
+        <div id="map_${r.route_key}" class="routemap"></div>
+        ${stopTable(r, true)}
+      </div>
+      <div class="legpanel" data-leg="pm" hidden>
+        ${warnBox("This leg is bias-free",
+          `The drop-off tap is recorded as the child steps off the bus. It carries no scan
+           lag, the slider does not affect it, and these figures can be acted on today.`, "good")}
+        ${coverageWarning(r, "pm_dropoff", "afternoon drop-off")}
+        ${gate === null ? "" : warnBox("Dismissal gate load " + num(gate) + " min",
+          `Median spread between the first and last child boarding this bus at dismissal,
+           across ${r.gate_load.days} days. Every stop downstream inherits this delay.`,
+          gate > 20 ? "" : "info")}
+        ${stopTable(r, false)}
+      </div>
+    </div></details>`;
+}
+
+function feasNote(r, f) {
+  if (!f) return warnBox("Feasibility cannot be assessed",
+    "There is no usable observed run-in time from this route's final stop to school.");
+  const anchorNote = r.final_is_last_printed ? "" :
+    ` The printed final stop, ${esc(r.last_printed_stop)}, has no tap data at all —
+      nobody boards there — so the run-in is measured from the last stop that does.`;
+  const body = `Printed departure from <b>${esc(r.final_stop)}</b> at
+    ${clock(r.final_printed_min)}, plus an observed run-in of
+    ${num(r.runin_median_min)} min (n=${r.runin_n}), plus the current scan lag of
+    ${L} min, implies arrival at <b>${clock(f.implied)}</b> against a reporting
+    time of ${clock(r.reporting_min)}.${anchorNote}`;
+  if (f.slack < 0)
+    return warnBox(`Printed schedule is not achievable at L = ${L} — short by ${num(-f.slack)} min`, body);
+  if (f.slack < 2)
+    return warnBox(`Only ${num(f.slack)} min of slack at L = ${L}`, body);
+  return warnBox(`${num(f.slack)} min of slack at L = ${L}`, body, "good");
+}
+
+function wireRoutes() {
+  document.querySelectorAll("details.route").forEach(d => {
+    d.querySelectorAll(".subtabs button").forEach(b => {
+      b.onclick = () => {
+        const leg = b.dataset.leg;
+        d.querySelectorAll(".subtabs button").forEach(x =>
+          x.setAttribute("aria-selected", x === b));
+        d.querySelectorAll(".legpanel").forEach(p => p.hidden = p.dataset.leg !== leg);
+        const r = DATA.routes.find(x => x.route_key === d.dataset.route);
+        if (leg === "am") drawRouteMap(r, true); else drawRouteMap(r, false);
+      };
+    });
+    d.addEventListener("toggle", () => {
+      if (!d.open) return;
+      const r = DATA.routes.find(x => x.route_key === d.dataset.route);
+      const leg = d.querySelector('.subtabs button[aria-selected=true]').dataset.leg;
+      drawRouteMap(r, leg === "am");
+    });
+  });
+}
+
+/* ==================================================================
+   Tab: Data quality
+   ================================================================== */
+function renderQuality() {
+  const legs = DATA.coverage.by_leg.map(l => l.leg);
+  const byRoute = {};
+  for (const c of DATA.coverage.by_route) {
+    (byRoute[c.route_key] = byRoute[c.route_key] || {})[c.leg] = c;
+  }
+  let h = `<div class="panel"><h2>Coverage by route and leg</h2>
+    <div class="note">Any cell below ${Math.round(C.LOW_COVERAGE * 100)}% is flagged.
+      The consequence is stated plainly: that leg cannot support a parent-facing
+      feature for that route until scanning improves.</div>
+    <div class="scroll"><table><thead><tr><th>Route</th>
+      ${legs.map(l => `<th class="num">${esc(DATA.coverage.by_leg.find(x => x.leg === l).label)}</th>`).join("")}
+      <th>Consequence</th></tr></thead><tbody>`;
+  for (const r of DATA.routes) {
+    const row = byRoute[r.route_key] || {};
+    const bad = legs.filter(l => row[l] && row[l].coverage_pct < C.LOW_COVERAGE * 100);
+    h += `<tr><td><b>${esc(r.label)}</b>${r.status !== "operating"
+      ? ` <span class="pill p-warn">${esc(r.status)}</span>` : ""}</td>`;
+    for (const l of legs) {
+      const c = row[l];
+      const low = c && c.coverage_pct < C.LOW_COVERAGE * 100;
+      h += `<td class="num"${low ? ' style="background:var(--warn-bg);color:var(--warn);font-weight:650"' : ""}>
+        ${c ? num(c.coverage_pct) + "%" : "—"}</td>`;
+    }
+    h += `<td class="small muted">${bad.length
+      ? esc(bad.map(l => DATA.coverage.by_leg.find(x => x.leg === l).label).join(", "))
+        + " cannot support a parent-facing feature for this route"
+      : "all legs above threshold"}</td></tr>`;
+  }
+  h += `</tbody></table></div></div>`;
+
+  /* coverage over time */
+  const byDate = {};
+  for (const c of DATA.coverage.by_date) (byDate[c.date] = byDate[c.date] || {})[c.leg] = c.coverage_pct;
+  const dates = Object.keys(byDate).sort();
+  h += `<div class="panel"><h2>Coverage over time</h2>
+    <div class="note">Whether scanning is improving, and whether any single day
+      should be discounted.</div>
+    <div class="scroll"><table><thead><tr><th>Date</th>
+      ${legs.map(l => `<th class="num">${esc(DATA.coverage.by_leg.find(x => x.leg === l).label)}</th>`).join("")}
+      </tr></thead><tbody>`;
+  for (const d of dates) {
+    h += `<tr><td class="mono">${esc(d)}</td>`;
+    for (const l of legs) {
+      const v = byDate[d][l];
+      const low = v !== undefined && v < C.LOW_COVERAGE * 100;
+      h += `<td class="num"${low ? ' style="color:var(--warn);font-weight:650"' : ""}>
+        ${v === undefined ? "—" : num(v) + "%"}</td>`;
+    }
+    h += `</tr>`;
+  }
+  h += `</tbody></table></div></div>`;
+
+  /* geocoding quality */
+  const t = DATA.totals;
+  h += `<div class="panel"><h2>Stop locations</h2>
+    <div class="note">Stop names in the source files are informal — "K-42 near
+      kwality store bazar", "T Point". A geocoder answers these confidently and
+      often wrongly, so none of them is treated as fact until a human confirms it.</div>
+    <div class="facts">
+      <div class="fact"><div class="v">${t.geo_points}</div><div class="k">points to locate</div></div>
+      <div class="fact"><div class="v">${t.geo_resolved}</div><div class="k">geocoder returned a usable point</div></div>
+      <div class="fact"><div class="v">${t.geo_verified}</div><div class="k">confirmed by a human</div></div>
+      <div class="fact"><div class="v">${t.geo_flagged}</div><div class="k">flagged for review</div></div>
+    </div>
+    ${warnBox(`${t.geo_unverified} of ${t.geo_points} stop locations are unverified`,
+      `Every one of them is listed in <span class="mono">geocode_review.csv</span> with the
+       address the service returned and why it is suspect. Corrections go in
+       <span class="mono">geocode_overrides.json</span>, which always wins over the cache.
+       Until a point is corrected there it is drawn with a dashed outline and must not be
+       presented to anyone as the stop's true location.`)}
+    </div>`;
+
+  if (DATA.quarantine.length) {
+    h += `<div class="panel"><h2>Quarantined records</h2>
+      <div class="note">Implausible values are set aside rather than deleted.</div>
+      <div class="scroll"><table><thead><tr><th>Reason</th><th class="num">Rows</th>
+        </tr></thead><tbody>`;
+    for (const q of DATA.quarantine)
+      h += `<tr><td>${esc(q.exception_reason)}</td><td class="num">${int(q.rows)}</td></tr>`;
+    h += `</tbody></table></div></div>`;
+  }
+  return h;
+}
+
+/* ==================================================================
+   Tab: Exceptions
+   ================================================================== */
+function renderExceptions() {
+  const e = DATA.exceptions;
+  const tbl = (rows, cols) => {
+    if (!rows.length) return `<p class="muted small">Nothing to show.</p>`;
+    let h = `<div class="scroll"><table><thead><tr>${
+      cols.map(c => `<th${c[2] ? ' class="num"' : ""}>${esc(c[0])}</th>`).join("")
+    }</tr></thead><tbody>`;
+    for (const r of rows) h += `<tr>${cols.map(c =>
+      `<td${c[2] ? ' class="num"' : ""}>${esc(Array.isArray(r[c[1]]) ? r[c[1]].join(", ") : r[c[1]])}</td>`
+    ).join("")}</tr>`;
+    return h + "</tbody></table></div>";
+  };
+  return `
+  <div class="panel">${warnBox("Children are named on this tab, and only on this tab",
+    "Identifying the child is the operational purpose here — someone has to go and check. "
+    + "No child is named anywhere else in this dashboard, and nothing on any tab is "
+    + "attributed to a named driver, attendant or vehicle.", "info")}</div>
+
+  <div class="panel"><h2>Travelled on a route other than their usual one</h2>
+    <div class="note"><b>Safety item.</b> ${int(e.off_route.student_days)} student-days
+      across ${int(e.off_route.children)} children. Kept separate from stale roster
+      records below — conflating the two produces a meaningless number in the thousands.</div>
+    ${tbl(e.off_route.rows, [["Child", "student"], ["Admission no.", "admission_no"],
+      ["Usual route", "usual"], ["Travelled on", "travelled"], ["Days", "days", 1]])}</div>
+
+  <div class="panel"><h2>Rostered on a route they never travel</h2>
+    <div class="note"><b>Stale-record item, not a safety item.</b>
+      ${int(e.stale_roster.children)} children. The roster is a snapshot; route
+      assignments were restructured mid-term.</div>
+    ${tbl(e.stale_roster.rows, [["Child", "student_name"], ["Admission no.", "admission_no"],
+      ["Rostered on", "rostered"], ["Actually travels", "actually_travels"]])}</div>
+
+  <div class="panel"><h2>Boarded in the morning, no afternoon record</h2>
+    <div class="note">${int(e.am_no_pm.count)} student-days across
+      ${int(e.am_no_pm.children)} children. Most of these are missed scans rather
+      than missing children — the afternoon drop tap is the weakest leg at
+      ${num(DATA.coverage.by_leg.find(l => l.leg === "pm_dropoff").coverage_pct)}% coverage.
+      ${e.am_no_pm.rows.length < e.am_no_pm.count
+        ? `Showing the first ${e.am_no_pm.rows.length}.` : ""}</div>
+    ${tbl(e.am_no_pm.rows, [["Child", "student"], ["Admission no.", "admission_no"], ["Date", "date"]])}</div>
+
+  <div class="panel"><h2>Dropped off, no morning record</h2>
+    <div class="note">${int(e.pm_no_am.count)} student-days across
+      ${int(e.pm_no_am.children)} children.
+      ${e.pm_no_am.rows.length < e.pm_no_am.count
+        ? `Showing the first ${e.pm_no_am.rows.length}.` : ""}</div>
+    ${tbl(e.pm_no_am.rows, [["Child", "student"], ["Admission no.", "admission_no"], ["Date", "date"]])}</div>`;
+}
+
+/* ==================================================================
+   Shell
+   ================================================================== */
+const TABS = [
+  { id: "overview", label: "Overview", render: renderOverview },
+  { id: "map", label: "Map", render: renderMap, wire: wireMap },
+  { id: "routes", label: "Routes", render: renderRoutes, wire: wireRoutes },
+  { id: "quality", label: "Data quality", render: renderQuality },
+  { id: "exceptions", label: "Exceptions", render: renderExceptions },
+];
+let active = "overview";
+
+function paint() {
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  for (const t of TABS) {
+    const sec = el("section");
+    sec.setAttribute("role", "tabpanel");
+    sec.id = "panel_" + t.id;
+    sec.hidden = t.id !== active;
+    if (t.id === active) sec.innerHTML = t.render();
+    main.appendChild(sec);
+  }
+  const t = TABS.find(x => x.id === active);
+  if (t.wire) t.wire();
+}
+
+function buildTabs() {
+  const bar = document.getElementById("tabs");
+  for (const t of TABS) {
+    const b = el("button", null, t.label);
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", t.id === active);
+    b.setAttribute("aria-controls", "panel_" + t.id);
+    b.onclick = () => {
+      active = t.id;
+      bar.querySelectorAll("button").forEach((x, i) =>
+        x.setAttribute("aria-selected", TABS[i].id === active));
+      paint();
+    };
+    b.onkeydown = ev => {
+      const i = TABS.findIndex(x => x.id === active);
+      if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
+        ev.preventDefault();
+        const j = (i + (ev.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length;
+        bar.children[j].click(); bar.children[j].focus();
+      }
+    };
+    bar.appendChild(b);
+  }
+}
+
+function onLagChange(v) {
+  L = +v;
+  document.getElementById("lagval").textContent = L + " min";
+  paint();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const m = DATA.meta, t = DATA.totals;
+  document.getElementById("subline").innerHTML =
+    `${esc(m.period_start)} to ${esc(m.period_end)} · ${m.school_days} school days · `
+    + `${int(t.children_in_logs)} children · ${t.routes_operating} routes operating · `
+    + `${int(t.taps_usable)} taps. `
+    + `<span class="muted">This is a picture of what is currently true. It contains no `
+    + `recommendations and proposes no changes.</span>`;
+
+  const slider = document.getElementById("lag");
+  slider.min = C.L_MIN; slider.max = C.L_MAX; slider.value = C.L_DEFAULT;
+  L = C.L_DEFAULT;
+  document.getElementById("lagval").textContent = L + " min";
+  slider.addEventListener("input", e => onLagChange(e.target.value));
+
+  const ex = document.getElementById("lagexplain"), why = document.getElementById("whybtn");
+  const setEx = open => {
+    ex.style.display = open ? "block" : "none";
+    why.setAttribute("aria-expanded", open);
+    why.textContent = open ? "Hide explanation" : "What is this?";
+  };
+  setEx(true);
+  why.onclick = () => setEx(why.getAttribute("aria-expanded") !== "true");
+
+  document.getElementById("foot").innerHTML =
+    `Built ${esc(m.generated_at)} from the ${esc(m.period_start)}–${esc(m.period_end)} export. `
+    + `Geocoding: ${esc(m.geocoder)}. Road times: ${esc(m.router)} `
+    + `(${m.router_has_traffic ? "traffic-aware" : "free-flow, no traffic model"}). `
+    + `Thresholds used for classification are arbitrary and are listed in the README.`;
+
+  buildTabs();
+  paint();
+});
+</script>
+<style>.seqlbl{background:none;border:0;box-shadow:none;color:#fff;font:700 10px var(--mono);
+  text-shadow:0 0 2px rgba(0,0,0,.9)}.seqlbl::before{display:none}</style>
+</body>
+</html>

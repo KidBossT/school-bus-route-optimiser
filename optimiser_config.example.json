@@ -1,0 +1,31 @@
+{
+ "_README": [
+  "Copy to optimiser_config.json to use. Any key left out keeps its default",
+  "(pipeline/optimiser/config.py). Keys starting with _ are ignored.",
+  "Values marked ASSUMPTION in config.py are not in the source files -",
+  "confirm them with the transport office before acting on a plan."
+ ],
+ "default_capacity": 40,
+ "capacity_by_route": {"R07": 32},
+ "extra_vehicles": 0,
+ "max_ride_min": 75,
+ "earliest_pickup_min": 360,
+ "dismissal_min": 890,
+ "latest_drop_min": 1005,
+ "matrix_provider": "google",
+ "time_multiplier_am": 1.0,
+ "time_multiplier_pm": 1.0,
+ "neighbours": 15,
+ "require_verified": true,
+ "merge_radius_m": 250,
+ "apply_stop_merges": false,
+ "time_limit_s": 60,
+ "weights": {
+  "bus_fixed": 60,
+  "drive_min": 1.0,
+  "km": 0.5,
+  "student_ride_min": 0.05,
+  "reassigned_student": 2.0,
+  "violation": 1000
+ }
+}

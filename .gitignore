@@ -1,0 +1,24 @@
+# secrets (Google keys, site password)
+.env
+
+# school data and everything derived from it: stays on the project computer
+inputs/
+*.xlsx
+*.zip
+cache/
+outputs/
+analysis_v1/
+promo_video/
+claude-code-prompt.md
+
+# local tooling
+.claude/
+.vercel/
+.staticrypt.json
+
+# python
+__pycache__/
+*.pyc
+
+# atomic-write temp files
+*.tmp

@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus route planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b0f17;--panel:rgba(16,21,31,.86);--panel2:rgba(22,28,40,.9);--line:rgba(255,255,255,.08);
+  --ink:#eef2f7;--muted:#8b95a7;--faint:#5b6577;
+  --cur:#9aa3b2;--opt:#3b82f6;--opt2:#60a5fa;--save:#22c55e;--warn:#f59e0b;--bad:#ef4444;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);overflow:hidden}
+#map{position:fixed;inset:0;background:#0b0f17}
+/* Google map popups, dark */
+.gm-style .gm-style-iw-c{background:var(--panel2)!important;color:var(--ink);border:1px solid var(--line);border-radius:12px!important;box-shadow:0 12px 40px rgba(0,0,0,.5)!important;padding:12px 14px!important;font:13px var(--sans)}
+.gm-style .gm-style-iw-d{overflow:auto!important;color:var(--ink)}
+.gm-style .gm-style-iw-tc::after{background:var(--panel2)!important}
+.gm-style .gm-style-iw-chr{position:absolute;right:0;top:0}
+.gm-style .gm-style-iw-chr button span{background-color:#8b95a7!important}
+.gm-style .gm-style-cc,.gm-style-cc{opacity:.75}
+.gm-pin div{width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid #0b0f17;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.gm-notice code{font:500 11px var(--mono);color:#cbd5e1}
+
+/* ---------- panel ---------- */
+.panel{position:fixed;top:16px;left:16px;bottom:16px;width:440px;max-width:calc(100vw - 32px);
+  background:var(--panel);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px) saturate(140%);
+  box-shadow:0 20px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden;z-index:1000}
+.head{padding:18px 18px 12px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:grid;place-items:center;font-weight:800;font-size:15px;box-shadow:0 6px 18px rgba(59,130,246,.35)}
+.brand h1{font-size:15px;font-weight:700;margin:0;letter-spacing:-.01em}
+.brand small{display:block;color:var(--muted);font-size:11.5px;font-weight:500}
+.picker{display:flex;gap:8px;align-items:stretch}
+.picker select{flex:1;appearance:none;-webkit-appearance:none;background:var(--panel2) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%238b95a7' stroke-width='1.8' fill='none' stroke-linecap='round'/></svg>") no-repeat right 12px center;
+  color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 34px 10px 12px;font:600 14px var(--sans);cursor:pointer}
+.picker button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:10px;width:40px;font-size:16px;cursor:pointer}
+.picker button:hover,.picker select:hover{border-color:rgba(255,255,255,.2)}
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:3px;margin-top:10px}
+.seg button{flex:1;border:0;background:none;color:var(--muted);padding:7px;border-radius:8px;font:600 13px var(--sans);cursor:pointer;transition:.15s}
+.seg button[aria-pressed=true]{background:rgba(59,130,246,.18);color:#bfdbfe;box-shadow:inset 0 0 0 1px rgba(59,130,246,.35)}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 18px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat .v{font:700 20px/1.1 var(--sans);letter-spacing:-.02em}
+.stat .v small{font-size:12px;font-weight:600;color:var(--muted);margin-left:2px}
+.stat .k{color:var(--muted);font-size:11px;margin-top:4px;font-weight:500}
+.stat.cur .v{color:var(--cur)}.stat.opt .v{color:var(--opt2)}
+.stat.save{background:linear-gradient(160deg,rgba(34,197,94,.18),rgba(34,197,94,.06));border-color:rgba(34,197,94,.35)}
+.stat.save .v{color:#4ade80}
+.viewtabs{display:flex;gap:6px;padding:0 18px 10px}
+.viewtabs button{flex:1;border:1px solid var(--line);background:none;color:var(--muted);padding:8px;border-radius:9px;font:600 12.5px var(--sans);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px}
+.viewtabs button i{width:18px;height:3px;border-radius:2px;display:inline-block}
+.viewtabs button.c i{background:var(--cur);background:repeating-linear-gradient(90deg,var(--cur) 0 4px,transparent 4px 7px)}
+.viewtabs button.o i{background:var(--opt)}
+.viewtabs button[aria-pressed=true]{background:var(--panel2);color:var(--ink);border-color:rgba(255,255,255,.18)}
+.scroll{overflow-y:auto;flex:1;padding:4px 10px 14px;scrollbar-width:thin;scrollbar-color:#2a3345 transparent}
+.tl{position:relative;padding-left:6px}
+.stop{display:grid;grid-template-columns:30px 1fr auto;gap:10px;padding:9px 8px;border-radius:10px;align-items:center;cursor:pointer;position:relative}
+.stop:hover,.stop.hot{background:rgba(255,255,255,.05)}
+.stop::before{content:"";position:absolute;left:22px;top:0;bottom:0;width:2px;background:var(--line)}
+.stop:first-child::before{top:50%}.stop:last-child::before{bottom:50%}
+.stop .n{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:600 11.5px var(--mono);color:#fff;position:relative;z-index:1;border:2px solid var(--bg)}
+.v-o .stop .n{background:var(--opt)}.v-c .stop .n{background:#4b5563}
+.stop.school .n{background:#f8fafc;color:#0b0f17}
+.stop .name{font-weight:600;font-size:13px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stop .sub{color:var(--muted);font-size:11.5px;margin-top:2px;font-weight:500}
+.stop .t{text-align:right}
+.stop .eta{font:600 14px var(--mono)}
+.chip{display:inline-block;font:600 10.5px var(--mono);padding:2px 6px;border-radius:6px;margin-top:3px;background:rgba(255,255,255,.06);color:var(--muted)}
+.chip.late{background:rgba(239,68,68,.15);color:#fca5a5}.chip.early{background:rgba(59,130,246,.15);color:#93c5fd}.chip.ok{background:rgba(34,197,94,.14);color:#86efac}
+.stop.approx .name::after{content:"≈";color:var(--warn);margin-left:6px;font-weight:700}
+.miss{margin:10px 8px 0;padding:10px 12px;border-radius:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);font-size:12px;color:#fcd34d}
+.miss b{display:block;margin-bottom:4px;color:#fde68a}
+.miss span{display:block;color:#d9b866;padding:2px 0}
+.foot{padding:10px 18px;border-top:1px solid var(--line);color:var(--faint);font-size:10.5px;line-height:1.4}
+.legend{position:fixed;right:16px;bottom:16px;z-index:1000;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:11.5px;color:var(--muted);backdrop-filter:blur(14px);display:flex;gap:14px;align-items:center}
+.legend i{display:inline-block;width:22px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.legend .lo{background:var(--opt);box-shadow:0 0 8px var(--opt)}
+.legend .lc{background:repeating-linear-gradient(90deg,var(--cur) 0 5px,transparent 5px 9px)}
+.legend b{color:var(--warn)}
+/* route lines */
+.line-opt{filter:drop-shadow(0 0 6px rgba(59,130,246,.8));stroke-dasharray:1 14;stroke-linecap:round;animation:flow 1.4s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-15}}
+.line-opt-base{filter:drop-shadow(0 0 5px rgba(59,130,246,.5))}
+.mk{background:none;border:0}
+.mk div{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:600 11px var(--mono);color:#fff;border:2px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.5);transition:transform .15s}
+.mk.o div{background:var(--opt)}.mk.c div{background:#4b5563}.mk.approx div{border-style:dashed}
+.mk.hot div{transform:scale(1.35);box-shadow:0 0 0 6px rgba(59,130,246,.35)}
+.mk.s div{background:#fff;color:#0b0f17;width:30px;height:30px;font-size:13px}
+/* ---------- tabs: routes / stops / fleet ---------- */
+.modes{display:flex;gap:4px;margin:-4px 0 12px;border-bottom:1px solid var(--line)}
+.modes button{flex:1;border:0;background:none;color:var(--muted);padding:8px 4px 10px;font:600 13px var(--sans);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.modes button[aria-pressed=true]{color:var(--ink);border-bottom-color:var(--opt)}
+.viewtabs button.x i{background:linear-gradient(90deg,var(--cur) 0 45%,transparent 45% 55%,var(--opt) 55%)}
+/* compare: two synced maps */
+#map2{position:fixed;top:0;bottom:0;right:0;display:none;background:#0b0f17;border-left:2px solid rgba(255,255,255,.12)}
+body.cmp #map{left:472px;right:calc((100vw - 472px)/2)}
+body.cmp #map2{display:block;left:calc(472px + (100vw - 472px)/2)}
+.maplabel{position:fixed;top:14px;z-index:900;display:none;padding:7px 12px;border-radius:10px;font:700 12px var(--sans);letter-spacing:.02em;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(12px)}
+.maplabel small{display:block;font:500 11px var(--sans);color:var(--muted);letter-spacing:0}
+body.cmp .maplabel{display:block}
+#lab1{left:486px;color:#cbd5e1}#lab2{left:calc(486px + (100vw - 472px)/2);color:#93c5fd}
+/* what-changed */
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:4px 8px 10px}
+.summary div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11.5px;color:var(--muted)}
+.summary b{display:block;color:var(--ink);font:600 13px var(--mono);margin-top:2px}
+.chg{display:grid;grid-template-columns:54px 1fr auto;gap:8px;padding:8px;border-radius:10px;align-items:center;cursor:pointer}
+.chg:hover,.chg.hot{background:rgba(255,255,255,.05)}
+.chg .pos{font:600 12px var(--mono);display:flex;align-items:center;gap:4px}
+.chg .pos .nw{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--opt);color:#fff;font-size:11px}
+.chg .pos .mv{font-size:10.5px;color:var(--muted)}.chg .pos .mv.up{color:#86efac}.chg .pos .mv.dn{color:#fca5a5}
+.chg .name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chg .sub{color:var(--muted);font-size:11px}
+.chg .t{text-align:right;font:600 12px var(--mono)}
+.chg .t s{color:var(--faint);font-weight:500}
+/* fuel & CO2 */
+.fuel{margin:4px 8px 12px;padding:12px;border-radius:12px;background:linear-gradient(160deg,rgba(34,197,94,.12),rgba(34,197,94,.03));border:1px solid rgba(34,197,94,.3)}
+.fuel .ft{font:700 11px var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.fuel .ft span{font-weight:600;text-transform:none;letter-spacing:0;color:var(--faint);margin-left:4px}
+.fuel .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fuel .v{font:700 17px/1.15 var(--sans);color:#4ade80;letter-spacing:-.01em}
+.fuel .v small{font-size:11px;color:var(--muted);margin-left:2px}
+.fuel .k{color:var(--muted);font-size:11px;margin-top:3px}
+.fuel .note{font-size:10.5px;color:var(--faint);margin-top:8px;line-height:1.4}
+.fuel details summary{cursor:pointer;color:var(--muted);font-size:11.5px;font-weight:600;margin-top:10px}
+.fuel label{display:grid;grid-template-columns:1fr 84px;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:7px}
+.fuel input{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:5px 8px;font:600 12px var(--mono);width:100%}
+.sect{margin:12px 8px 4px;font:700 11px var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+/* stops tab */
+.filters{display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px 4px}
+.filters button{border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:999px;padding:5px 10px;font:600 11.5px var(--sans);cursor:pointer}
+.filters button[aria-pressed=true]{color:var(--ink);border-color:rgba(255,255,255,.25)}
+.filters i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+.srow{display:grid;grid-template-columns:14px 1fr auto;gap:10px;padding:8px;border-radius:10px;align-items:center;cursor:pointer}
+.srow:hover{background:rgba(255,255,255,.05)}
+.srow .dot{width:10px;height:10px;border-radius:50%}
+.srow .name{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow .sub{color:var(--muted);font-size:11px}
+.badge{font:600 10.5px var(--mono);padding:2px 6px;border-radius:6px;background:rgba(255,255,255,.06);color:var(--muted);white-space:nowrap}
+.badge.w{background:rgba(245,158,11,.14);color:#fcd34d}
+.c-ver{background:#22c55e}.c-ok{background:#4ade80}.c-one{background:#f59e0b}.c-area{background:#ef4444}.c-merge{background:#c084fc}.c-miss{background:#64748b}
+.pin{background:none;border:0}
+.pin div{width:14px;height:14px;border-radius:50%;border:2px solid #0b0f17;box-shadow:0 0 0 1px rgba(255,255,255,.7),0 3px 8px rgba(0,0,0,.5);cursor:grab}
+.pin.edited div{box-shadow:0 0 0 3px #fff,0 0 12px #fff}
+.tool{margin:8px 8px 0;padding:10px 12px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+.tool button{margin-top:8px;width:100%;border:0;border-radius:9px;padding:9px;font:700 12.5px var(--sans);background:var(--opt);color:#fff;cursor:pointer}
+.tool button:disabled{background:#2a3345;color:var(--faint);cursor:default}
+.tool code{font:500 10.5px var(--mono);color:#cbd5e1;word-break:break-all}
+/* fleet tab */
+.frow{display:grid;grid-template-columns:62px 1fr 1fr 58px;gap:8px;padding:9px 8px;border-radius:10px;align-items:center;cursor:pointer;font-size:12px}
+.frow:hover,.frow.hot{background:rgba(255,255,255,.05)}
+.frow .rt{font-weight:700}.frow .rt small{display:block;color:var(--muted);font-weight:500;font-size:10.5px}
+.frow .ss{font:600 11.5px var(--mono);color:var(--muted)}.frow .ss b{color:var(--ink)}
+.frow .tot{text-align:right;font:700 13px var(--mono);color:#4ade80}
+.fhead{display:grid;grid-template-columns:62px 1fr 1fr 58px;gap:8px;padding:4px 8px;font:700 10.5px var(--sans);color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+@media(max-width:720px){
+  .panel{top:auto;left:0;right:0;bottom:0;width:100%;max-width:none;height:62vh;border-radius:18px 18px 0 0}
+  .legend{bottom:calc(62vh + 12px)}
+  body.cmp #map{left:0;right:50%;bottom:62vh}
+  body.cmp #map2{left:50%;bottom:62vh}
+  #lab1{left:8px;top:8px}#lab2{left:calc(50% + 8px);top:8px}
+  .maplabel{font-size:10.5px;padding:5px 8px}
+  .foot{max-height:4.3em;overflow:hidden;cursor:pointer;position:relative}
+  .foot.open{max-height:none}
+}
+</style>
+</head>
+<body>
+<div id="map" aria-label="Map"></div>
+<div id="map2" aria-label="Map of the new route"></div>
+<div class="maplabel" id="lab1"></div>
+<div class="maplabel" id="lab2"></div>
+
+<aside class="panel">
+  <div class="head">
+    <div class="brand"><div class="logo">P</div><div><h1>Bus route planner</h1><small id="brandsub"></small></div></div>
+    <div class="modes" role="tablist">
+      <button id="m-routes" aria-pressed="true">Routes</button>
+      <button id="m-stops" aria-pressed="false">Stops</button>
+      <button id="m-fleet" aria-pressed="false">Fleet</button>
+    </div>
+    <div class="picker" id="picker">
+      <button id="prev" aria-label="Previous route">‹</button>
+      <select id="route" aria-label="Route"></select>
+      <button id="next" aria-label="Next route">›</button>
+    </div>
+    <div class="seg"><button id="am" aria-pressed="true">Morning · to school</button><button id="pm" aria-pressed="false">Afternoon · from school</button></div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="viewtabs" id="viewtabs">
+    <button class="c" id="vc" aria-pressed="false"><i></i>Old route</button>
+    <button class="o" id="vo" aria-pressed="false"><i></i>New route</button>
+    <button class="x" id="vx" aria-pressed="true"><i></i>Compare</button>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div class="scroll" id="list"></div>
+  <div class="foot" id="foot"></div>
+</aside>
+
+<div class="legend" id="legend"></div>
+
+__GMAP_TAGS__
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("payload").textContent);
+let mode = "routes", ri = 0, leg = "am", view = "x", filter = "check", markers = {}, sat = false, editPins = false;
+const corrections = {};
+const $ = id => document.getElementById(id);
+const clock = m => { if (m == null) return "—"; const t = ((Math.round(m) % 1440) + 1440) % 1440;
+  return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const kids = n => `${n} ${n === 1 ? "child" : "children"}`;
+const signed = d => { d = Math.round(d); return d === 0 ? "±0" : d > 0 ? `+${d}` : `−${-d}`; };
+const chip = (a, b) => { const d = Math.round(a - b);
+  return d === 0 ? `<span class="chip ok">on time</span>` : d > 0 ? `<span class="chip late">+${d} min</span>` : `<span class="chip early">−${-d} min</span>`; };
+// Re-fit the view only when what is shown changes (route, run, view, filter) -
+// not when a toggle or a pin drag re-draws the same thing, which would throw
+// away wherever the reader had panned to.
+let fitKey = "";
+function fitOnce(key, b) { if (key !== fitKey) { fitKey = key; map.fitBounds(b, pad()); } }
+const pad = () => ({ paddingTopLeft: [window.innerWidth > 720 && !document.body.classList.contains("cmp") ? 480 : 30, 50],
+  paddingBottomRight: [30, window.innerWidth > 720 ? 30 : 20], maxZoom: 14 });
+
+function tiles(m) { L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(m); }
+const map = L.map("map", { zoomControl: false }); tiles(map);
+L.control.zoom({ position: "topright" }).addTo(map);
+const map2 = L.map("map2", { zoomControl: false, attributionControl: false }); tiles(map2);
+const layer = L.layerGroup().addTo(map), layer2 = L.layerGroup().addTo(map2);
+let syncing = false;
+for (const [a, b] of [[map, map2], [map2, map]]) a.on("move", () => {
+  if (syncing || !document.body.classList.contains("cmp")) return;
+  syncing = true; b.setView(a.getCenter(), a.getZoom(), { animate: false }); syncing = false; });
+
+function schoolIcon() { return L.divIcon({ className: "mk s", html: "<div>S</div>", iconSize: [30, 30], iconAnchor: [15, 15] }); }
+function stopIcon(n, cls) { return L.divIcon({ className: "mk " + cls, html: `<div>${n}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }); }
+function school(lyr) { L.marker([DATA.school.lat, DATA.school.lon], { icon: schoolIcon(), zIndexOffset: 500 }).addTo(lyr).bindPopup("<b>Prometheus School</b>"); }
+
+const SRC = { google_places: "Google Places", google: "Google Geocoding", photon: "Photon (OSM)",
+  nominatim: "Nominatim (OSM)", arcgis: "Esri", override: "verified" };
+function placedBy(x) {
+  if (x.verified) return x.verified_by === "GPS" ? "location measured by GPS on the bus" : "location hand-verified";
+  const a = x.agree || [];
+  return a.length >= 2 ? `placed by ${a.map(esc).join(" + ")} (agree)`
+    : `placed by ${esc(SRC[x.source] || x.source)} only — unconfirmed`;
+}
+
+/* ================= ROUTES ================= */
+function drawRun(lyr, p, kind, pts, keep) {
+  const b = [[DATA.school.lat, DATA.school.lon]];
+  if (kind === "o") {
+    L.polyline(p.geometry, { color: "#1d4ed8", weight: 7, opacity: .55, className: "line-opt-base" }).addTo(lyr);
+    L.polyline(p.geometry, { color: "#93c5fd", weight: 3, opacity: .95, className: "line-opt" }).addTo(lyr);
+  } else {
+    L.polyline(p.geometry, { color: "#cbd5e1", weight: 4, opacity: .85, dashArray: "8,10" }).addTo(lyr);
+  }
+  p.stops.forEach((st, i) => {
+    const x = pts[st.name] || {};
+    if (x.lat == null) return;
+    const m = L.marker([x.lat, x.lon], { icon: stopIcon(i + 1, kind + (x.approx ? " approx" : "")) }).addTo(lyr)
+      .bindPopup(`<b>${esc(st.name)}</b><br><span style="color:#8b95a7">${kids(x.riders)} · printed ${clock(st.printed)} · est. ${clock(st.eta)}<br>${placedBy(x)}</span>`);
+    if (keep) { m.on("mouseover", () => hot(st.name, true)); m.on("mouseout", () => hot(st.name, false)); keep[st.name] = m; }
+    b.push([x.lat, x.lon]);
+  });
+  return b;
+}
+
+function renderRoutes() {
+  if (sat && map.setMapType) { sat = false; map.setMapType("roadmap"); }
+  const r = DATA.routes[ri], d = r[leg], morning = leg === "am";
+  $("route").value = ri;
+  $("brandsub").textContent = `${r.route} · ${kids(r.children)} · ${d.located} stops placed`;
+  layer.clearLayers(); layer2.clearLayers(); markers = {};
+  school(layer); school(layer2);
+  const cmp = view === "x" && !!d.plan;
+  document.body.classList.toggle("cmp", cmp);
+  map.invalidateSize(); map2.invalidateSize();
+  if (!d.plan) {
+    $("stats").innerHTML = `<div class="stat" style="grid-column:1/-1"><div class="v">—</div><div class="k">Not enough placed stops to plan this run</div></div>`;
+    $("list").innerHTML = missing(d);
+    map.fitBounds([[DATA.school.lat, DATA.school.lon]], { maxZoom: 12 }); return;
+  }
+  const c = d.plan.current, o = d.plan.optimised, s = d.plan.saved_min;
+  $("stats").innerHTML = `
+    <div class="stat cur"><div class="v">${Math.round(c.drive_min)}<small>min</small></div><div class="k">old route · ${c.km} km</div></div>
+    <div class="stat opt"><div class="v">${Math.round(o.drive_min)}<small>min</small></div><div class="k">new route · ${o.km} km</div></div>
+    <div class="stat save"><div class="v">${s > 0 ? "−" : ""}${Math.round(Math.abs(s))}<small>min</small></div><div class="k">${s > 0.5 ? "saved per trip" : d.plan.note ? "no faster order found" : "already optimal"}</div></div>`;
+  const pts = {}; d.points.forEach(x => pts[x.name] = x);
+  let b;
+  if (cmp) {
+    b = drawRun(layer, c, "c", pts, null);
+    drawRun(layer2, o, "o", pts, markers);
+    $("lab1").innerHTML = `OLD · printed order<small>${Math.round(c.drive_min)} min · ${c.km} km</small>`;
+    $("lab2").innerHTML = `NEW · optimised order<small>${Math.round(o.drive_min)} min · ${o.km} km</small>`;
+    $("list").className = "scroll";
+    $("list").innerHTML = changes(r, d) + missing(d);
+  } else {
+    const p = view === "o" ? o : c, other = view === "o" ? c : o;
+    L.polyline(other.geometry, { color: view === "o" ? "#9aa3b2" : "#3b82f6", weight: 3, opacity: .3, dashArray: view === "o" ? "6,8" : null }).addTo(layer);
+    b = drawRun(layer, p, view, pts, markers);
+    $("list").className = "scroll " + (view === "o" ? "v-o" : "v-c");
+    $("list").innerHTML = `<div class="tl">${timeline(r, p, pts, morning)}</div>` + missing(d);
+  }
+  $("list").querySelectorAll("[data-k]").forEach(el => {
+    const k = el.dataset.k;
+    el.onmouseenter = () => hot(k, true); el.onmouseleave = () => hot(k, false);
+    el.onclick = () => { const m = markers[k]; if (m) { (cmp ? map2 : map).flyTo(m.getLatLng(), Math.max(map.getZoom(), 14), { duration: .6 }); m.openPopup(); }
+      else if (k === "__school") map.flyTo([DATA.school.lat, DATA.school.lon], 14, { duration: .6 }); };
+  });
+  fitOnce(`routes|${ri}|${leg}|${view}`, b);
+}
+
+function timeline(r, p, pts, morning) {
+  const html = [];
+  const schoolRow = `<div class="stop school" data-k="__school"><span class="n">S</span><div><div class="name">Prometheus School</div>
+      <div class="sub">${morning ? (r.reporting ? "reporting time " + clock(r.reporting) : "arrival") : "departure"}</div></div>
+      <div class="t"><div class="eta">${clock(p.school_time)}</div>${morning && r.reporting ? chip(p.school_time, r.reporting) : ""}</div></div>`;
+  if (!morning) html.push(schoolRow);
+  p.stops.forEach((st, i) => {
+    const x = pts[st.name] || {};
+    html.push(`<div class="stop${x.approx ? " approx" : ""}" data-k="${esc(st.name)}"><span class="n">${i + 1}</span>
+      <div><div class="name" title="${esc(st.name)}">${esc(st.name)}</div>
+      <div class="sub">printed ${clock(st.printed)}${st.leg_min != null ? ` · ${Math.round(st.leg_min)} min drive` : ""} · ${kids(x.riders ?? 0)}</div></div>
+      <div class="t"><div class="eta">${clock(st.eta)}</div>${chip(st.eta, st.printed)}</div></div>`);
+  });
+  if (morning) html.push(schoolRow);
+  return html.join("");
+}
+
+function changes(r, d) {
+  const c = d.plan.current, o = d.plan.optimised, morning = leg === "am";
+  const oldIx = {}; c.stops.forEach((s, i) => oldIx[s.name] = i);
+  const oldEta = {}; c.stops.forEach(s => oldEta[s.name] = s.eta);
+  const pts = {}; d.points.forEach(x => pts[x.name] = x);
+  const moved = o.stops.filter((s, i) => oldIx[s.name] !== i).length;
+  const ride = (p, s) => morning ? p.school_time - s.eta : s.eta - p.school_time;
+  const longest = p => Math.max(...p.stops.map(s => ride(p, s)));
+  const sum = [
+    [`Stops that change position`, `${moved} of ${o.stops.length}`],
+    [`Distance`, `${c.km} → ${o.km} km`],
+    morning ? [`First pickup`, `${clock(c.stops[0].eta)} → ${clock(o.stops[0].eta)}`]
+            : [`Leaves school`, `${clock(c.school_time)} → ${clock(o.school_time)}`],
+    morning ? [`Reaches school`, `${clock(c.school_time)} → ${clock(o.school_time)}`]
+            : [`Last drop`, `${clock(c.stops.at(-1).eta)} → ${clock(o.stops.at(-1).eta)}`],
+    [`Longest ride for a child`, `${Math.round(longest(c))} → ${Math.round(longest(o))} min`],
+    [`Time saved per trip`, `${Math.round(d.plan.saved_min)} min`],
+    [`Fuel saved a year`, (f => `${inr(f.rupees)} · ${tonnes(f.co2)} CO₂`)(fuelCalc(c.km - o.km))],
+  ];
+  let h = `<div class="summary">${sum.map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("")}</div>`;
+  if (d.plan.note) h += `<div class="miss" style="margin-top:0">${esc(d.plan.note)}</div>`;
+  h += `<div class="sect">What changes, stop by stop (new order)</div>`;
+  o.stops.forEach((s, i) => {
+    const was = oldIx[s.name], shift = was - i, x = pts[s.name] || {};
+    const mv = shift === 0 ? `<span class="mv">same</span>` : `<span class="mv ${shift > 0 ? "up" : "dn"}">was ${was + 1}</span>`;
+    const dRide = ride(o, s) - ride(c, c.stops[was]);
+    h += `<div class="chg" data-k="${esc(s.name)}"><div class="pos"><span class="nw">${i + 1}</span>${mv}</div>
+      <div><div class="name" title="${esc(s.name)}">${esc(s.name)}</div>
+      <div class="sub">${kids(x.riders ?? 0)} · ride ${signed(dRide)} min · printed ${clock(s.printed)}</div></div>
+      <div class="t"><s>${clock(oldEta[s.name])}</s><br>${clock(s.eta)}</div></div>`;
+  });
+  return h;
+}
+
+function hot(k, on) {
+  document.querySelectorAll(`[data-k="${CSS.escape(k)}"]`).forEach(e => e.classList.toggle("hot", on));
+  const m = markers[k]; if (m && m._icon) m._icon.classList.toggle("hot", on);
+}
+function missing(d) {
+  if (!d.missing.length) return "";
+  return `<div class="miss"><b>${d.missing.length} stop${d.missing.length > 1 ? "s" : ""} not on the map</b>` +
+    d.missing.map(m => `<span>${esc(m.name)} — ${esc(m.why)}${m.printed != null ? ", printed " + clock(m.printed) : ""}</span>`).join("") + `</div>`;
+}
+
+/* ================= STOPS ================= */
+function stopStatus(p) {
+  if (p.verified) return ["ver", p.verified_by === "GPS" ? "GPS-verified" : "hand-verified"];
+  if ((p.agree || []).length >= 2) return ["ok", "confirmed by 2+ sources"];
+  if (p.approx) return ["area", "area-level match only"];
+  return ["one", "one source only"];
+}
+function allStops() {
+  const by = {};
+  DATA.routes.forEach(r => r[leg].points.forEach(p => {
+    const k = p.key || p.name;
+    if (!by[k]) by[k] = { ...p, routes: [], riders: 0 };
+    by[k].routes.push(r.route.replace("Route ", "R")); by[k].riders += p.riders || 0;
+  }));
+  return Object.values(by);
+}
+function renderStops() {
+  document.body.classList.remove("cmp"); map.invalidateSize();
+  layer.clearLayers(); markers = {}; school(layer);
+  const stops = allStops(), merges = (DATA.merges || {})[leg] || [];
+  const miss = []; DATA.routes.forEach(r => r[leg].missing.forEach(m => miss.push({ ...m, route: r.route })));
+  const cls = stops.map(stopStatus);
+  const n = { all: stops.length, check: cls.filter(c => c[0] === "one" || c[0] === "area").length,
+    ok: cls.filter(c => c[0] === "ok" || c[0] === "ver").length, moved: stops.filter(p => p.old).length,
+    merge: merges.length, miss: miss.length };
+  $("brandsub").textContent = `${n.all} stops placed · ${n.ok} confirmed · ${n.check} to check`;
+  $("stats").innerHTML = `
+    <div class="stat"><div class="v">${n.ok}</div><div class="k">confirmed pins</div></div>
+    <div class="stat"><div class="v" style="color:#fcd34d">${n.check}</div><div class="k">need checking</div></div>
+    <div class="stat"><div class="v" style="color:#c084fc">${n.merge}</div><div class="k">merge ideas</div></div>`;
+  const F = [["check", "Needs checking", "c-one"], ["ok", "Confirmed", "c-ok"], ["moved", "Moved by Google", "c-ver"],
+             ["merge", "Merge ideas", "c-merge"], ["miss", "Not on map", "c-miss"], ["all", "All", ""]];
+  $("filters").innerHTML = F.map(([k, t, c]) => `<button data-f="${k}" aria-pressed="${filter === k}">${c ? `<i class="${c}"></i>` : ""}${t} ${n[k]}</button>`).join("");
+  $("filters").querySelectorAll("button").forEach(b => b.onclick = () => { filter = b.dataset.f; render(); });
+
+  const b = [[DATA.school.lat, DATA.school.lon]];
+  const show = p => { const s = stopStatus(p)[0];
+    return filter === "all" || filter === "merge" || filter === "miss" || (filter === "check" && (s === "one" || s === "area"))
+      || (filter === "ok" && (s === "ok" || s === "ver")) || (filter === "moved" && p.old); };
+  stops.forEach(p => {
+    const [s, label] = stopStatus(p), dim = !show(p);
+    const c = corrections[p.key];
+    const pos = c ? [c.lat, c.lon] : [p.lat, p.lon];
+    if (p.old && (filter === "moved" || filter === "all")) {
+      L.polyline([p.old, [p.lat, p.lon]], { color: "#94a3b8", weight: 2, opacity: .7, dashArray: "4,6" }).addTo(layer);
+      L.circleMarker(p.old, { radius: 4, color: "#94a3b8", fillColor: "#475569", fillOpacity: 1, weight: 1 }).addTo(layer)
+        .bindTooltip(`Old free-map pin for ${esc(p.name)} · ${p.moved_km} km from Google's`);
+    }
+    const m = L.marker(pos, { draggable: editPins, opacity: dim ? .25 : 1, zIndexOffset: dim ? 0 : 100,
+      icon: L.divIcon({ className: "pin" + (c ? " edited" : ""), html: `<div class="c-${s}"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] }) })
+      .addTo(layer).bindPopup(`<b>${esc(p.name)}</b><br><span style="color:#8b95a7">${p.routes.join(", ")} · ${kids(p.riders)}<br>${label}${p.label ? `<br>matched: ${esc(p.label)}` : ""}${p.moved_km != null && p.old ? `<br>Google moved it ${p.moved_km} km from the old free-map pin` : p.old_missing ? "<br>the old free map services could not place it" : ""}<br><i>Drag to where the bus really stops.</i></span>`);
+    m.on("dragend", e => { const ll = e.target.getLatLng();
+      corrections[p.key] = { key: p.key, text: p.text || p.name, lat: +ll.lat.toFixed(6), lon: +ll.lng.toFixed(6) };
+      render(); });
+    markers[p.key] = m;
+    if (!dim) b.push(pos);
+  });
+  if (filter === "merge") merges.forEach(g => {
+    L.circle([g.hub_lat, g.hub_lon], { radius: DATA.merge_radius_m, color: "#c084fc", weight: 1, fillOpacity: .08 }).addTo(layer);
+    g.members.forEach(mm => L.polyline([[mm.lat, mm.lon], [g.hub_lat, g.hub_lon]], { color: "#c084fc", weight: 3, opacity: .9 }).addTo(layer));
+    b.push([g.hub_lat, g.hub_lon]);
+  });
+
+  let h = "";
+  const nc = Object.keys(corrections).length;
+  h += `<div class="tool"><div style="display:flex;gap:6px;margin-bottom:8px">
+      <button id="sat" style="margin:0;flex:1;background:var(--panel);border:1px solid var(--line);color:var(--ink)">${sat ? "Map view" : "Satellite view"}</button>
+      <button id="edit" aria-pressed="${editPins}" style="margin:0;flex:1;${editPins ? "" : "background:var(--panel);border:1px solid var(--line);color:var(--ink)"}">${editPins ? "Moving pins: ON" : "Move pins: off"}</button></div>
+    ${editPins ? "Drag a pin to where the bus actually stops. Turn this off to pan the map by dragging again." : "Drag the map to look around. To fix a pin, turn on <b>Move pins</b>, then drag it."} Corrections are saved as a file for the planner to import, which marks those pins verified.
+    <button id="dl" ${nc ? "" : "disabled"}>Download ${nc} correction${nc === 1 ? "" : "s"}</button>
+    ${nc ? `<div style="margin-top:6px">Then run: <code>python pipeline/run_optimiser.py --import-coords stop_corrections.csv</code> and rebuild.</div>` : ""}</div>`;
+  if (filter === "merge") {
+    h += `<div class="sect">Stops within ${DATA.merge_radius_m} m of each other</div>`;
+    merges.forEach((g, i) => {
+      h += `<div class="srow" data-g="${i}"><span class="dot c-merge"></span><div><div class="name">Keep: ${esc(g.hub_name)}</div>
+        <div class="sub">${g.members.map(mm => `${esc(mm.name)} (${mm.route}, ${kids(mm.children)}, ${mm.walk_m} m walk)`).join("; ")}</div></div>
+        <span class="badge">${g.same_place ? "same place" : `−${g.stops_removed} stop${g.stops_removed > 1 ? "s" : ""}`}</span></div>`;
+    });
+    if (!merges.length) h += `<div class="sub" style="padding:8px">No placed stops are that close together.</div>`;
+  } else if (filter === "miss") {
+    h += `<div class="sect">Stops the planner could not place</div>`;
+    miss.forEach(m => h += `<div class="srow"><span class="dot c-miss"></span><div><div class="name">${esc(m.name)}</div><div class="sub">${esc(m.route)} · ${esc(m.why)}</div></div><span></span></div>`);
+  } else {
+    const rows = stops.filter(show).sort((a, b) => {
+      const o = { area: 0, one: 1, ok: 2, ver: 3 };
+      return o[stopStatus(a)[0]] - o[stopStatus(b)[0]] || (b.moved_km || 0) - (a.moved_km || 0) || b.riders - a.riders; });
+    rows.forEach(p => { const [s, label] = stopStatus(p);
+      h += `<div class="srow" data-p="${esc(p.key)}"><span class="dot c-${s}"></span><div><div class="name" title="${esc(p.name)}">${esc(p.name)}</div>
+        <div class="sub">${p.routes.join(", ")} · ${kids(p.riders)} · ${label}</div></div>
+        ${corrections[p.key] ? `<span class="badge w">corrected</span>` : p.old ? `<span class="badge${p.moved_km > 1 ? " w" : ""}">moved ${p.moved_km} km</span>` : "<span></span>"}</div>`; });
+  }
+  $("list").className = "scroll"; $("list").innerHTML = h;
+  $("list").querySelectorAll("[data-p]").forEach(el => el.onclick = () => {
+    const m = markers[el.dataset.p]; if (m) { map.flyTo(m.getLatLng(), 16, { duration: .6 }); m.openPopup(); } });
+  $("list").querySelectorAll("[data-g]").forEach(el => el.onclick = () => {
+    const g = merges[+el.dataset.g]; map.flyTo([g.hub_lat, g.hub_lon], 17, { duration: .6 }); });
+  const dl = $("dl"); if (dl) dl.onclick = download;
+  const sb = $("sat"); if (sb) sb.onclick = () => { sat = !sat; map.setMapType && map.setMapType(sat ? "hybrid" : "roadmap"); render(); };
+  const eb = $("edit"); if (eb) eb.onclick = () => { editPins = !editPins; render(); };
+  fitOnce(`stops|${leg}|${filter}`, b);
+}
+function download() {
+  const q = v => `"${String(v).replace(/"/g, '""')}"`;
+  const rows = [["key", "stop_text", "google_maps", "note"].join(",")].concat(Object.values(corrections).map(c =>
+    [q(c.key), q(c.text), q(`${c.lat}, ${c.lon}`), q(`moved on planner map ${new Date().toISOString().slice(0, 10)}`)].join(",")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + rows.join("\n")], { type: "text/csv" }));
+  a.download = "stop_corrections.csv"; a.click();
+}
+
+/* ================= fuel & CO2 ================= */
+// Yearly savings from the km the new routes save. Every input is an editable
+// assumption (no source file has mileage or prices); the reader's values are
+// kept in this browser only.
+const FUEL_DEFAULT = { type: "mixed", cngShare: 50, days: 220,
+  cng: { kmPer: 4, price: 85, co2: 2.7 }, diesel: { kmPer: 5, price: 88, co2: 2.68 } };
+const FUEL = (() => {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem("planner-fuel") || "{}") || {}; } catch (e) {}
+  return { ...FUEL_DEFAULT, ...s, cng: { ...FUEL_DEFAULT.cng, ...(s.cng || {}) },
+           diesel: { ...FUEL_DEFAULT.diesel, ...(s.diesel || {}) } };
+})();
+let fuelOpen = false;
+const saveFuel = () => { try { localStorage.setItem("planner-fuel", JSON.stringify(FUEL)); } catch (e) {} };
+const inr = v => { const a = Math.abs(v), s = v < -0.5 ? "−" : "";
+  return a >= 1e5 ? `${s}₹${(a / 1e5).toFixed(1)} lakh` : `${s}₹${Math.round(a).toLocaleString("en-IN")}`; };
+const tonnes = kg => Math.abs(kg) >= 1000 ? `${(kg / 1000).toFixed(1)} t` : `${Math.round(kg)} kg`;
+
+function fuelCalc(kmDay) {
+  const s = FUEL.type === "cng" ? 1 : FUEL.type === "diesel" ? 0 : Math.min(Math.max(FUEL.cngShare, 0), 100) / 100;
+  const km = kmDay * FUEL.days, c = FUEL.cng, d = FUEL.diesel;
+  const cngQty = c.kmPer > 0 ? km * s / c.kmPer : 0, dslQty = d.kmPer > 0 ? km * (1 - s) / d.kmPer : 0;
+  return { km, cngQty, dslQty, rupees: cngQty * c.price + dslQty * d.price, co2: cngQty * c.co2 + dslQty * d.co2 };
+}
+
+function fuelOut(kmDay) {
+  const f = fuelCalc(kmDay), n = v => Math.round(v).toLocaleString("en-IN");
+  const qty = [f.cngQty >= 0.5 ? `${n(f.cngQty)} kg CNG` : "", f.dslQty >= 0.5 ? `${n(f.dslQty)} litres diesel` : ""]
+    .filter(Boolean).join(" + ") || "No fuel";
+  return `<div class="row3">
+      <div><div class="v">${inr(f.rupees)}</div><div class="k">fuel money saved a year</div></div>
+      <div><div class="v">${tonnes(f.co2)}</div><div class="k">less CO₂ a year</div></div>
+      <div><div class="v">${n(f.km)}<small>km</small></div><div class="k">less driving a year</div></div></div>
+    <div class="note">${qty} a year: ${kmDay.toFixed(1)} km less a day × ${FUEL.days} school days. Only distance is counted.
+      Time no longer spent crawling in traffic saves fuel too, so this is a low estimate.</div>`;
+}
+
+function fuelCard(kmDay) {
+  const t = FUEL.type, c = FUEL.cng, d = FUEL.diesel;
+  const num = (path, v, step, max) => `<input type="number" min="0"${max ? ` max="${max}"` : ""} step="${step}" data-f="${path}" value="${v}">`;
+  return `<div class="fuel" id="fuel"><div class="ft">Yearly savings<span>estimate</span></div><div id="fuelout">${fuelOut(kmDay)}</div>
+    <details${fuelOpen ? " open" : ""}><summary>Assumptions: change these to the school's real figures</summary>
+      <div class="seg">${[["cng", "CNG"], ["diesel", "Diesel"], ["mixed", "Mixed fleet"]].map(([k, l]) =>
+        `<button data-t="${k}" aria-pressed="${t === k}">${l}</button>`).join("")}</div>
+      ${t === "mixed" ? `<label>Share of buses on CNG, % ${num("cngShare", FUEL.cngShare, 5, 100)}</label>` : ""}
+      ${t !== "diesel" ? `<label>CNG: km per kg ${num("cng.kmPer", c.kmPer, 0.1)}</label>
+        <label>CNG price, ₹ per kg ${num("cng.price", c.price, 0.5)}</label>` : ""}
+      ${t !== "cng" ? `<label>Diesel: km per litre ${num("diesel.kmPer", d.kmPer, 0.1)}</label>
+        <label>Diesel price, ₹ per litre ${num("diesel.price", d.price, 0.5)}</label>` : ""}
+      <label>School days a year ${num("days", FUEL.days, 1)}</label>
+      <div class="note">The starting values are typical for NCR school buses, not measured: put in the buses' real mileage
+        and today's pump price. CO₂ from burning the fuel: ${c.co2} kg per kg of CNG, ${d.co2} kg per litre of diesel.</div>
+    </details></div>`;
+}
+
+function bindFuel(kmDay) {
+  const box = $("fuel"); if (!box) return;
+  box.querySelector("details").ontoggle = e => { fuelOpen = e.target.open; };
+  box.querySelectorAll("[data-t]").forEach(b => b.onclick = () => {
+    FUEL.type = b.dataset.t; saveFuel(); box.outerHTML = fuelCard(kmDay); bindFuel(kmDay); });
+  box.querySelectorAll("[data-f]").forEach(inp => inp.oninput = () => {
+    const v = parseFloat(inp.value); if (!(v >= 0)) return;
+    const [a, b] = inp.dataset.f.split(".");
+    if (b) FUEL[a][b] = v; else FUEL[a] = a === "cngShare" ? Math.min(v, 100) : v;
+    saveFuel(); $("fuelout").innerHTML = fuelOut(kmDay);
+  });
+}
+
+/* ================= FLEET ================= */
+function renderFleet() {
+  if (sat && map.setMapType) { sat = false; map.setMapType("roadmap"); }
+  document.body.classList.remove("cmp"); map.invalidateSize();
+  layer.clearLayers(); markers = {}; school(layer);
+  const rows = DATA.routes.map((r, i) => {
+    const a = r.am.plan, p = r.pm.plan;
+    return { i, r, a, p, tot: (a ? a.saved_min : 0) + (p ? p.saved_min : 0) };
+  }).sort((x, y) => y.tot - x.tot);
+  let cur = 0, opt = 0, kmc = 0, kmo = 0;
+  rows.forEach(x => [x.a, x.p].forEach(q => { if (q) { cur += q.current.drive_min; opt += q.optimised.drive_min; kmc += q.current.km; kmo += q.optimised.km; } }));
+  $("brandsub").textContent = `${DATA.routes.length} routes · both runs each school day`;
+  $("stats").innerHTML = `
+    <div class="stat save"><div class="v">${Math.round(cur - opt)}<small>min</small></div><div class="k">saved per day</div></div>
+    <div class="stat"><div class="v">${Math.round(kmc - kmo)}<small>km</small></div><div class="k">less driving per day</div></div>
+    <div class="stat"><div class="v">${(100 * (1 - opt / cur)).toFixed(1)}<small>%</small></div><div class="k">less drive time</div></div>`;
+  const b = [[DATA.school.lat, DATA.school.lon]];
+  rows.forEach((x, k) => { const q = leg === "am" ? x.a : x.p; if (!q) return;
+    const hue = (x.i * 137.5) % 360;
+    const ln = L.polyline(q.optimised.geometry, { color: `hsl(${hue} 80% 62%)`, weight: 3, opacity: .75 }).addTo(layer)
+      .bindTooltip(`${x.r.route} · saves ${Math.round(q.saved_min)} min`);
+    markers["r" + x.i] = ln; q.optimised.geometry.forEach(g => b.push(g)); });
+  const cell = q => q ? `<b>${Math.round(q.current.drive_min)}→${Math.round(q.optimised.drive_min)}</b>` : "—";
+  let h = fuelCard(kmc - kmo) + `<div class="fhead"><span>Route</span><span>Morning min</span><span>Afternoon min</span><span style="text-align:right">Saved</span></div>`;
+  rows.forEach(x => h += `<div class="frow" data-r="${x.i}"><div class="rt">${x.r.route.replace("Route ", "R")}<small>${kids(x.r.children)}</small></div>
+    <div class="ss">${cell(x.a)}</div><div class="ss">${cell(x.p)}</div><div class="tot">${x.tot > 0.5 ? "−" + Math.round(x.tot) : "0"}</div></div>`);
+  h += `<div class="sub" style="padding:10px 8px;color:var(--muted);font-size:11px">Minutes are calibrated drive time per trip, old route → new route. Click a route to compare it.</div>`;
+  $("list").className = "scroll"; $("list").innerHTML = h;
+  bindFuel(kmc - kmo);
+  $("list").querySelectorAll("[data-r]").forEach(el => {
+    const ln = markers["r" + el.dataset.r];
+    el.onmouseenter = () => ln && ln.setStyle({ weight: 7, opacity: 1 });
+    el.onmouseleave = () => ln && ln.setStyle({ weight: 3, opacity: .75 });
+    el.onclick = () => { ri = +el.dataset.r; view = "x"; setMode("routes"); };
+  });
+  fitOnce(`fleet|${leg}`, b);
+}
+
+/* ================= shell ================= */
+function legend() {
+  if (mode === "stops") return `<span><i class="c-ok" style="width:10px;height:10px;border-radius:50%"></i>confirmed</span><span><i class="c-one" style="width:10px;height:10px;border-radius:50%"></i>one source</span><span><i class="c-area" style="width:10px;height:10px;border-radius:50%"></i>area only</span><span><i style="width:10px;height:10px;border-radius:50%;background:#475569"></i>old pin</span>`;
+  if (mode === "fleet") return `<span>New routes, one colour per bus</span>`;
+  return `<span><i class="lo"></i>New route</span><span><i class="lc"></i>Old route</span><span><b>≈</b> approximate stop</span>`;
+}
+function setMode(m) {
+  mode = m;
+  for (const k of ["routes", "stops", "fleet"]) $("m-" + k).setAttribute("aria-pressed", k === m);
+  $("picker").style.display = m === "routes" ? "" : "none";
+  $("viewtabs").style.display = m === "routes" ? "" : "none";
+  $("filters").style.display = m === "stops" ? "" : "none";
+  $("legend").innerHTML = legend();
+  for (const [id, v] of [["vc", "c"], ["vo", "o"], ["vx", "x"]]) $(id).setAttribute("aria-pressed", view === v);
+  render();
+}
+function render() { mode === "stops" ? renderStops() : mode === "fleet" ? renderFleet() : renderRoutes(); }
+function footer() {
+  const road = DATA.road_source || [], g = road.includes("google");
+  const src = Object.entries(DATA.geo_sources || {}).sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${SRC[k] || k} ${n}`).join(", ");
+  const cb = DATA.calibration || {}, cv = cb.validation || {};
+  const paceText = cb.applied
+    ? ` Scaled to how these buses actually run: Google's car times are multiplied by a factor that depends on leg length (short hops ×${cb.model.factors.am[0]}, long legs ×${cb.model.factors.am[4]} in the morning), fitted 80% on the printed timetable and 20% on tap run times.${cb.model.verified_factor?.am != null ? ` Between pins measured by GPS on the bus, Google's times are used ×${cb.model.verified_factor.am} (measured on ${cb.model.gps_legs.am} GPS legs): with the right pins Google already matches the bus, so most of the scaling above is making up for pins in the wrong place.` : ""} Tested route by route, the typical error against the printed times is ${cv.am?.printed_stop_error_min?.calibrated ?? "?"} min per stop in the morning and ${cv.pm?.printed_stop_error_min?.calibrated ?? "?"} in the afternoon (raw Google: ${cv.am?.printed_stop_error_min?.google ?? "?"} and ${cv.pm?.printed_stop_error_min?.google ?? "?"}).`
+    : "";
+  return (g
+    ? `Drive times: Google Maps traffic prediction at the printed time on a typical school day (Tuesday)${road.includes("osrm") ? ", except runs Google could not price, which use free-flow OpenStreetMap times" : ""}, + ${DATA.dwell_min} min per stop.${paceText} ${(DATA.order_source || []).includes("google") ? "The new order is searched on Google's travel times, alongside an OpenStreetMap-searched alternative; whichever is fastest on Google's full-route timing is kept, and only if it beats the printed order." : "Stop order is searched on OpenStreetMap roads, then kept only if Google agrees it is faster."}`
+    : `Drive times: OpenStreetMap routing, free-flow (no traffic) + ${DATA.dwell_min} min per stop.${paceText}`)
+    + ` Stop locations: ${src}. ${DATA.corroborated ?? 0} of ${DATA.points_total ?? 0} are confirmed by two independent sources; <b style="color:#f59e0b">≈</b> marks an area-level match. Not yet checked on the ground — verify before changing anything.`;
+}
+
+const sel = $("route");
+DATA.routes.forEach((r, i) => { const o = document.createElement("option"); o.value = i;
+  const sv = (r.am.plan ? r.am.plan.saved_min : 0) + (r.pm.plan ? r.pm.plan.saved_min : 0);
+  o.textContent = `${r.route}  ·  ${kids(r.children)}${sv > 0.5 ? `  ·  saves ${Math.round(sv)} min/day` : ""}`; sel.appendChild(o); });
+sel.onchange = e => { ri = +e.target.value; render(); };
+$("prev").onclick = () => { ri = (ri + DATA.routes.length - 1) % DATA.routes.length; render(); };
+$("next").onclick = () => { ri = (ri + 1) % DATA.routes.length; render(); };
+for (const id of ["am", "pm"]) $(id).onclick = () => { leg = id; $("am").setAttribute("aria-pressed", id === "am"); $("pm").setAttribute("aria-pressed", id === "pm"); render(); };
+for (const [id, v] of [["vc", "c"], ["vo", "o"], ["vx", "x"]]) $(id).onclick = () => { view = v; setMode("routes"); };
+for (const k of ["routes", "stops", "fleet"]) $("m-" + k).onclick = () => setMode(k);
+document.addEventListener("keydown", e => { if (mode !== "routes" || e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowLeft") $("prev").click(); if (e.key === "ArrowRight") $("next").click(); });
+window.addEventListener("resize", () => { map.invalidateSize(); map2.invalidateSize(); });
+$("foot").innerHTML = footer();
+$("foot").onclick = () => $("foot").classList.toggle("open");
+setMode("routes");
+</script>
+</body>
+</html>
