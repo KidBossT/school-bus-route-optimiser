@@ -41,6 +41,7 @@ TRACK_LINK = """
                     <div class="track-alt">
                         <p>Bus staff: log a bus run with your phone's GPS. No password needed.</p>
                         <a href="track.html">Start GPS tracking<span>GPS ट्रैकिंग शुरू करें</span></a>
+                        <a class="apk" href="bus-gps.apk" download>Download the Android app<span>Bus GPS app (records with the screen locked)</span></a>
                     </div>"""
 TRACK_CSS = """
             .staticrypt-page { width: auto; max-width: 360px; padding: 8% 16px 0; }
@@ -49,6 +50,7 @@ TRACK_CSS = """
             .track-alt p { margin: 0 0 10px; }
             .track-alt a { display: block; padding: 13px; border: 2px solid #3b82f6; color: #1d4ed8;
                            text-decoration: none; font-weight: 700; font-size: 15px; text-transform: uppercase; }
+            .track-alt a.apk { margin-top: 10px; border-color: #ddd; color: #333; }
             .track-alt a span { display: block; text-transform: none; font-weight: 600; font-size: 13px; margin-top: 2px; }
 """
 
@@ -90,6 +92,10 @@ def main() -> int:
         # the GPS tracker is public: it holds route names only (build_routes.render_tracker)
         for f in ["track.html"] + build_routes.TRACKER_FILES:
             (site / f).write_bytes((Path(tmp) / f).read_bytes())
+    # the Android app (pipeline/build_apk.py), offered as a download beside the web tracker
+    apk = ROOT / "dist" / "bus-gps.apk"
+    if apk.exists():
+        (site / "bus-gps.apk").write_bytes(apk.read_bytes())
     (site / "robots.txt").write_text(ROBOTS, encoding="utf-8")
     out = site / "index.html"
     text = out.read_text(encoding="utf-8")

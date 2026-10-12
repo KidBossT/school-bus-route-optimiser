@@ -125,6 +125,8 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
     <button class="btn" id="start">Start tracking<span class="hi">ट्रैकिंग शुरू करें</span></button>
     <p class="note" style="margin-top:10px">Then tap the big green button every time the bus stops to pick up or drop children.</p>
 
+    <a class="btn ghost" id="getApp" href="bus-gps.apk" download style="margin-top:14px">Download the Android app<span class="hi">Bus GPS app: keeps recording with the screen locked</span></a>
+
     <div class="card runs hidden" id="runsCard" style="margin-top:16px">
       <label class="f">Saved runs on this phone</label>
       <div id="runs"></div>
@@ -523,6 +525,7 @@ function init() {
   if (NATIVE) {
     $("ckLoc").innerHTML = "<b>Location ON</b>. When the app asks, choose <b>Precise</b> and <b>While using the app</b>, then <b>Allow</b> notifications. <span class=\"hi\">लोकेशन चालू रखें</span>";
     $("ckScreen").innerHTML = "You can <b>lock the phone</b> between stops: the app keeps recording. Unlock, tap, lock again. <span class=\"hi\">फ़ोन लॉक कर सकते हैं</span>";
+    $("getApp").classList.add("hidden");               // already in the app
   } else {
     $("bBrowser").classList.toggle("on", /PHX|OPR|Opera|SamsungBrowser|UCBrowser|wv\)/.test(ua) || !/Chrome\//.test(ua) && /Android/.test(ua));
     $("bInsecure").classList.toggle("on", !window.isSecureContext || !navigator.geolocation);
