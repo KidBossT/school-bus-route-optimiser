@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
+import numpy as np
+
 import calibration as cal
 import gps_runs
 
@@ -45,6 +47,42 @@ class TestGpsRuns(unittest.TestCase):
         self.assertAlmostEqual((ev[0]["dep"] - track[0][2]).total_seconds(), 40, delta=4)
         self.assertAlmostEqual((ev[1]["arr"] - track[0][2]).total_seconds(), 158, delta=4)
         self.assertIsNone(ev[1]["dep"])                      # logging ended at the stop
+
+    def _jittery_run(self, seed, outlier=False, creep=False):
+        """Phone-like track: stand 60 s, drive 1.1 km north in 120 s, stand. ~4 m jitter."""
+        rng = np.random.default_rng(seed)
+        t0 = dt.datetime(2026, 10, 5, 7, 0, 0)
+        m = 1 / 111320
+        trk = []
+        for s in range(300):
+            c = 30 * m if creep else 0
+            if s < 60:
+                lat = 28.50 + (c if s >= 30 else 0)                  # pulls 30 m forward at 30 s
+            elif s < 180:
+                lat = 28.50 + c + 0.01 * (s - 60) / 120
+            else:
+                lat = 28.51 + c
+            e = rng.normal(0, 4, 2) * m
+            if outlier and s in (40, 41):
+                e = e + 35 * m                                       # two stray fixes 35 m off
+            trk.append((lat + e[0], 77.30 + e[1], t0 + dt.timedelta(seconds=s)))
+        return trk, t0
+
+    def test_stop_survives_jitter_and_stray_fixes(self):
+        for seed in range(5):
+            trk, t0 = self._jittery_run(seed, outlier=True)
+            ev = gps_runs.stop_events(trk, [(trk[10][0], trk[10][1], t0 + dt.timedelta(seconds=10))])
+            self.assertAlmostEqual((ev[0]["dep"] - t0).total_seconds(), 60, delta=6)
+
+    def test_bus_pulling_forward_is_one_stop(self):
+        for seed in range(5):
+            trk, t0 = self._jittery_run(seed, creep=True)
+            ev = gps_runs.stop_events(trk, [(trk[10][0], trk[10][1], t0 + dt.timedelta(seconds=10))])
+            self.assertAlmostEqual((ev[0]["dep"] - t0).total_seconds(), 60, delta=6)
+
+    def test_distance_ignores_jitter_while_standing(self):
+        trk, _ = self._jittery_run(3)
+        self.assertAlmostEqual(gps_runs.path_km(trk), 1.11, delta=0.08)
 
     def test_align_skips_stops_and_taps(self):
         pins = [{"lat": 28.50 + 0.01 * i, "lon": 77.30} for i in range(5)]

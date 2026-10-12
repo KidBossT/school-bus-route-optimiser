@@ -12,6 +12,9 @@ every run.
 [Vercel](https://school-bus-route-optimiser.vercel.app/), password-protected
 because it shows children's pickup points. Ask the owner for access.
 
+**GPS tracker for bus staff:** [track.html](https://kidbosst.github.io/school-bus-route-optimiser/track.html),
+open to anyone (it holds route names only), also linked from the password page.
+
 ![Fleet view: every route's proposed order, one colour per bus, with the yearly savings estimate](docs/img/fleet.png)
 
 ## Results
@@ -83,6 +86,28 @@ flowchart LR
   vehicle-routing solver with time windows: Clarke-Wright savings construction,
   relocate / swap / 2-opt / 2-opt\* local search, then ruin-and-recreate.
 
+### GPS tracker (phone web app)
+
+Bus staff log a run from the browser on their own phones, with no app to install. Before this,
+the free Android logger used for the first run (GPSLogger) had left Google Play.
+
+- Records a continuous GPS track (`watchPosition`, high accuracy, about one fix a second)
+  and one waypoint per stop from a large **BUS STOPPED / बस रुकी** button; English and Hindi labels.
+- Keeps the screen on (Screen Wake Lock API), saves the run every 10 s so a closed tab
+  or a crash can be resumed, and opens offline (a service worker caches the page).
+- Filters fixes worse than 40 m and jumps faster than 130 km/h; detects Android's
+  "approximate location" and a blocked permission, and says how to fix each.
+- Writes the same GPX that `gps_runs.py` reads, with the route and session inside, and
+  shares it straight to WhatsApp (as `.gpx.txt`, the file type Chrome on Android can share).
+
+**Tested** by replaying the real Route 11 GPS run through the page: the clean replay
+reproduces every stop to within 1 s and 0.1 m. With phone-grade noise added (drifting
+4 m error, 3% poor fixes, 0.5% 400 m jumps), all 8 stops and the school arrival are still
+found, arrivals within 4 s, departures within 7 s, stop positions within 2–15 m. That
+needed the stop detector hardened: a stop now ends only after 4 s outside its 25 m
+circle, and a bus pulling forward up to 35 m at a gate stays one stop. Over 80
+simulated noisy stops the departure error is 2 s typical, 3 s worst.
+
 ### Engineering
 
 - Every Google call goes through one client that charges a monthly ledger before
@@ -91,7 +116,7 @@ flowchart LR
 - Google results expire from the cache after 30 days, as Google's terms require.
 - The server key never reaches a web page; the pages use a separate browser key
   restricted to the site's addresses and the Maps JavaScript API.
-- 32 unit tests, run on every push by GitHub Actions.
+- 38 unit tests, run on every push by GitHub Actions.
 
 ## Privacy
 
@@ -109,7 +134,7 @@ Python 3.12 and `pip install -r requirements.txt`. The school's three workbooks 
 ```bash
 python pipeline/build_routes.py      # data, routes and outputs/routes.html
 python pipeline/serve.py             # view it at http://localhost:8777
-python pipeline/gps_runs.py run.gpx --route 11 --session am --apply-pins
+python pipeline/gps_runs.py R11_am_2026-10-14_0702.gpx.txt --apply-pins   # a tracker file
 python -m unittest discover tests
 ```
 
@@ -134,11 +159,12 @@ pipeline/
   gmaps.py             Google client: usage caps, circuit breaker, 30-day expiry
   calibration.py       distance-band factors, isotonic fit, cross-validation
   build_routes.py      stop-order search and the planner page
-  gps_runs.py          GPX ingestion and stop alignment
+  gps_runs.py          GPX ingestion, stop detection and alignment
+  track_template.html  phone GPS tracker (track_assets/: offline cache, app icons)
   build_site.py        encrypted copy for the web
   optimiser/           network-wide vehicle-routing solver
   routes_template.html planner front end (Google Maps, no framework)
 tests/                 unit tests
-site/                  the published, encrypted planner
+site/                  the published planner (encrypted) and GPS tracker
 docs/TECHNICAL.md      full design notes, constants and known limits
 ```

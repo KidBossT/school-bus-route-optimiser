@@ -820,7 +820,26 @@ def render(data: dict, html: Path) -> Path:
     html.parent.mkdir(parents=True, exist_ok=True)
     html.write_text(tpl.replace("__GMAP_TAGS__", gmaps.browser_map_tags("dark"))
                     .replace("__DATA__", payload), encoding="utf-8")
+    render_tracker(data, html.parent)
     return html
+
+
+TRACKER_FILES = ["track-sw.js", "track.webmanifest", "track-icon-192.png", "track-icon-512.png"]
+
+
+def render_tracker(data: dict, folder: Path) -> Path:
+    """
+    The phone page bus staff use to log a run (track.html), beside the planner.
+    It carries route names only: no stops, pins or children, so it can be public.
+    """
+    here = Path(__file__).resolve().parent
+    routes = [r["route"] for r in data["routes"]]
+    tpl = (here / "track_template.html").read_text(encoding="utf-8")
+    page = folder / "track.html"
+    page.write_text(tpl.replace("__ROUTES__", json.dumps(routes)), encoding="utf-8")
+    for f in TRACKER_FILES:
+        (folder / f).write_bytes((here / "track_assets" / f).read_bytes())
+    return page
 
 
 if __name__ == "__main__":

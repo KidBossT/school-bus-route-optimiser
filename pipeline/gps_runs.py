@@ -3,13 +3,18 @@ Read a bus run logged on a phone (GPX) and turn it into ground truth.
 
     python pipeline/gps_runs.py "Self Tracking R11.gpx" --route 11 --session am
     python pipeline/gps_runs.py run.gpx --route 11 --session am --apply-pins
+    python pipeline/gps_runs.py R11_am_2026-10-14_0702.gpx.txt     # from the web tracker
+
+Files from the web tracker (site/track.html) say their own route and session, so
+--route and --session can be left out; a .gpx.txt name (how WhatsApp receives
+them from Android) is read like any GPX.
 
 The phone logs a continuous track and the person on the bus taps once at each
 stop (a waypoint: "Add waypoint" in Open GPX Tracker, Annotate in GPSLogger).
 From that this script measures, per stop:
 
   arrival    the bus came within STOP_RADIUS_M of where it stood at the tap
-  departure  the bus left that circle again
+  departure  the bus left that circle again (for EXIT_S seconds: one stray fix does not count)
   dwell      departure - arrival
   position   median of where the bus stood while stopped (the real pickup point)
 
@@ -30,6 +35,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import re
 import shutil
 import sys
 import xml.etree.ElementTree as ET
@@ -47,6 +53,14 @@ SKIP_PENALTY_M = 1500     # cost of leaving a tap unmatched in the sequence alig
 MATCH_MAX_M = 1500        # a tap further than this from its matched pin is reported, not trusted
 MOVING_KMH = 10           # a tap made faster than this was probably not at a stop
 REPEAT_TAP_M = 30         # a tap this close to the previous one is the same stop tapped twice
+CENTRE_S = 5              # the stop's centre: median of the track this many seconds either side of the tap
+EXIT_S = 4                # the bus has arrived/left only after this many seconds in a row outside the circle
+MIN_STEP_M = 10           # distance: steps shorter than this add up until they pass it (GPS jitter at rest)
+SMOOTH_S = 5              # distance: rolling median over this many seconds first
+CREEP_M = 35              # a bus pulling forward (or rolling up) this far within a stop ...
+CREEP_S = 8              # ... and standing again within this many seconds is still at the same stop
+REST_S = 10               # standing: REST_S seconds of track all within REST_M of their median
+REST_M = 20
 
 
 def _hav_m(a, b, c, d) -> float:
@@ -80,6 +94,20 @@ def read_gpx(path: Path) -> tuple[list, list, str]:
     return track, taps, root.get("creator", "")
 
 
+def run_label(path: Path) -> tuple[int | None, str | None]:
+    """Route number and session written by the web tracker (metadata, else file name)."""
+    try:
+        root = ET.parse(path).getroot()
+        desc = next((e.text or "" for e in root.iter() if e.tag.endswith("desc")), "")
+        m = re.search(r"route=(\d+)\s+session=(am|pm)", desc)
+        if m:
+            return int(m.group(1)), m.group(2)
+    except ET.ParseError:
+        pass
+    m = re.match(r"R(\d+)_(am|pm)_", path.name)
+    return (int(m.group(1)), m.group(2)) if m else (None, None)
+
+
 def per_second(track):
     """Track resampled to one point a second (phones skip points while standing still)."""
     t0 = track[0][2]
@@ -92,28 +120,83 @@ def per_second(track):
     return t0, sec, np.interp(sec, T, la), np.interp(sec, T, lo)
 
 
+def _dist_m(lat_r, lon_r, lat, lon):
+    return 2 * 6371000 * np.arcsin(np.sqrt(
+        np.sin((lat_r - math.radians(lat)) / 2) ** 2
+        + math.cos(math.radians(lat)) * np.cos(lat_r) * np.sin((lon_r - math.radians(lon)) / 2) ** 2))
+
+
+def _edge(dist, i: int, step: int) -> tuple[int, bool]:
+    """
+    Walk from the tap until the bus has been outside the stop circle for EXIT_S
+    seconds in a row; one stray fix outside (phone GPS jitter) does not end the
+    stop. Returns the last second inside, and whether logging ran out first.
+    """
+    x, last_in, outside = i, i, 0
+    while 0 <= x + step < len(dist):
+        x += step
+        if dist[x] < STOP_RADIUS_M:
+            last_in, outside = x, 0
+        else:
+            outside += 1
+            if outside >= EXIT_S:
+                return last_in, False
+    return last_in, outside < EXIT_S
+
+
+def _rest_at(la, lo, x: int):
+    """(lat, lon) if the bus stands still for REST_S seconds from second x, else None."""
+    if x < 0 or x + REST_S >= len(la):
+        return None
+    w = slice(x, x + REST_S + 1)
+    c = (float(np.median(la[w])), float(np.median(lo[w])))
+    d = _dist_m(np.radians(la[w]), np.radians(lo[w]), *c)
+    return c if d.max() < REST_M else None
+
+
+def _stop_edge(la, lo, lat_r, lon_r, centre, i: int, step: int) -> tuple[int, bool]:
+    """
+    The stop's start (step -1) or end (step +1) seen from second i. If the bus
+    leaves the circle but is standing again within CREEP_S seconds and CREEP_M
+    metres (it pulled forward at the gate), the stop carries on from there.
+    """
+    for _ in range(4):
+        e, out = _edge(_dist_m(lat_r, lon_r, *centre), i, step)
+        if out:
+            return e, True
+        nxt = None
+        for k in range(1, CREEP_S + 1):
+            x = e + step * k if step > 0 else e + step * k - REST_S      # rest window on the far side
+            c = _rest_at(la, lo, x)
+            if c and _hav_m(*c, *centre) < CREEP_M:
+                nxt = (c, x if step > 0 else x + REST_S)
+                break
+        if nxt is None:
+            return e, False
+        centre, i = nxt
+    return e, False
+
+
 def stop_events(track, taps) -> list[dict]:
     t0, sec, la, lo = per_second(track)
     lat_r, lon_r = np.radians(la), np.radians(lo)
     out = []
     for lat, lon, t in taps:
-        dist = 2 * 6371000 * np.arcsin(np.sqrt(
-            np.sin((lat_r - math.radians(lat)) / 2) ** 2
-            + math.cos(math.radians(lat)) * np.cos(lat_r) * np.sin((lon_r - math.radians(lon)) / 2) ** 2))
         i = int(min(max((t - t0).total_seconds(), 0), sec[-1]))
-        a = i
-        while a > 0 and dist[a - 1] < STOP_RADIUS_M:
-            a -= 1
-        b = i
-        while b < sec[-1] and dist[b + 1] < STOP_RADIUS_M:
-            b += 1
+        # centre on where the bus stood around the tap, not on the one fix the tap took
+        w = slice(max(i - CENTRE_S, 0), min(i + CENTRE_S, int(sec[-1])) + 1)
+        near = _dist_m(lat_r[w], lon_r[w], lat, lon) < STOP_RADIUS_M
+        if near.sum() >= 3:
+            lat, lon = float(np.median(la[w][near])), float(np.median(lo[w][near]))
+        a, began = _stop_edge(la, lo, lat_r, lon_r, (lat, lon), i, -1)
+        b, ended = _stop_edge(la, lo, lat_r, lon_r, (lat, lon), i, +1)
         j, k = max(i - 5, 0), min(i + 5, int(sec[-1]))
         moved = sum(_hav_m(la[x], lo[x], la[x + 1], lo[x + 1]) for x in range(j, k))
         kmh = moved / max(k - j, 1) * 3.6
         at = lambda s: t0 + dt.timedelta(seconds=int(s))
         out.append({
-            "tap": t, "arr": at(a) if a > 0 else None,            # logging began here
-            "dep": at(b) if b < sec[-1] else None,                 # logging ended here
+            "tap": t, "arr": None if began else at(a),             # logging began here
+            "dep": None if ended else at(b),                       # logging ended here
             "lat": float(np.median(la[a:b + 1])), "lon": float(np.median(lo[a:b + 1])),
             "moving_at_tap": kmh > MOVING_KMH,
         })
@@ -165,6 +248,28 @@ def planner_pins(outputs: Path, route: int, session: str) -> tuple[list[dict], t
     return seq, (d["school"]["lat"], d["school"]["lon"])
 
 
+def path_km(track) -> float:
+    """
+    Driven distance. The per-second track is smoothed with a SMOOTH_S rolling
+    median, then short steps accumulate until they pass MIN_STEP_M, so a phone's
+    GPS wandering while the bus stands still adds (almost) nothing.
+    """
+    if len(track) < 2:
+        return 0.0
+    _, sec, la, lo = per_second(track)
+    if len(sec) > SMOOTH_S:
+        h = SMOOTH_S // 2
+        pad = lambda v: np.concatenate([np.repeat(v[:1], h), v, np.repeat(v[-1:], h)])
+        win = lambda v: np.lib.stride_tricks.sliding_window_view(pad(v), SMOOTH_S)
+        la, lo = np.median(win(la), axis=1), np.median(win(lo), axis=1)
+    km, a = 0.0, (la[0], lo[0])
+    for p in zip(la[1:], lo[1:]):
+        m = _hav_m(a[0], a[1], p[0], p[1])
+        if m >= MIN_STEP_M:
+            km, a = km + m / 1000, p
+    return km
+
+
 def minute(t: dt.datetime | None) -> float | None:
     return None if t is None else round(t.hour * 60 + t.minute + t.second / 60, 2)
 
@@ -205,7 +310,7 @@ def ingest(path: Path, route: int, session: str, outputs: Path) -> dict:
     first = pins.index(next(p for p in pins if p["name"] == stops[0]["name"])) if stops else 0
     last = pins.index(next(p for p in pins if p["name"] == stops[-1]["name"])) if stops else -1
     skipped = [p["name"] for p in pins[first:last + 1] if p["name"] not in seen]
-    km = sum(_hav_m(*track[i][:2], *track[i + 1][:2]) for i in range(len(track) - 1)) / 1000
+    km = path_km(track)
     return {
         "file": path.name, "route": f"Route {route}", "num": route, "session": session,
         "date": track[0][2].date().isoformat(), "creator": creator,
@@ -299,15 +404,19 @@ if __name__ == "__main__":
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
     ap.add_argument("gpx", nargs="+")
-    ap.add_argument("--route", type=int, required=True)
-    ap.add_argument("--session", choices=["am", "pm"], required=True)
+    ap.add_argument("--route", type=int, help="route number (read from web-tracker files)")
+    ap.add_argument("--session", choices=["am", "pm"], help="am or pm (read from web-tracker files)")
     ap.add_argument("--outputs", default=str(root / "outputs"))
     ap.add_argument("--cache", default=str(root / "cache"))
     ap.add_argument("--apply-pins", action="store_true",
                     help="write measured stop positions into geocode_overrides.json")
     a = ap.parse_args()
     for f in a.gpx:
-        run = ingest(Path(f), a.route, a.session, Path(a.outputs))
+        route, session = run_label(Path(f))
+        route, session = a.route or route, a.session or session
+        if route is None or session is None:
+            raise SystemExit(f"{f}: give --route and --session (the file does not say them)")
+        run = ingest(Path(f), route, session, Path(a.outputs))
         save_run(run, Path(a.cache))
         print(report(run))
     if a.apply_pins:

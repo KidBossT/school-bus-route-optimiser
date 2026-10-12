@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1d4ed8">
+<title>Bus GPS tracker</title>
+<link rel="manifest" href="track.webmanifest">
+<link rel="icon" href="track-icon-192.png">
+<link rel="apple-touch-icon" href="track-icon-192.png">
+<style>
+/*
+  Phone page for logging one bus run: a continuous GPS track plus one tap per
+  stop, saved as a GPX file that pipeline/gps_runs.py reads. Nothing leaves the
+  phone until the person sends the file. No stop names or children's data here.
+*/
+:root{
+  --bg:#f4f6fb;--card:#ffffff;--ink:#0f172a;--muted:#5b6475;--line:#dde2ec;
+  --blue:#1d4ed8;--blue2:#2563eb;--green:#15803d;--greenbg:#dcfce7;--amber:#b45309;--amberbg:#fef3c7;
+  --red:#b91c1c;--redbg:#fee2e2;--stop:#16a34a;--stop2:#15803d;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Noto Sans Devanagari",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0b0f17;--card:#141a26;--ink:#eef2f7;--muted:#9aa4b5;--line:#263042;
+    --blue:#3b82f6;--blue2:#60a5fa;--green:#4ade80;--greenbg:#12301f;--amber:#fbbf24;--amberbg:#33270c;
+    --red:#f87171;--redbg:#3a1414;--stop:#16a34a;--stop2:#15803d}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:16px/1.4 var(--sans)}
+body{padding:max(14px,env(safe-area-inset-top)) 16px max(18px,env(safe-area-inset-bottom))}
+.wrap{max-width:480px;margin:0 auto}
+h1{font-size:21px;margin:4px 0 2px;letter-spacing:-.01em}
+.hi{display:block;font-size:.86em;font-weight:600;color:var(--muted)}
+.lead{color:var(--muted);font-size:14px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+label.f{display:block;font-weight:700;font-size:14px;margin-bottom:6px}
+select{width:100%;font:700 20px var(--sans);padding:12px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--ink)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.seg button{font:700 16px var(--sans);padding:12px 6px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--muted)}
+.seg button[aria-pressed=true]{border-color:var(--blue);color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,var(--card))}
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font:800 19px var(--sans);color:#fff;background:var(--blue);text-align:center;text-decoration:none}
+.btn .hi{color:rgba(255,255,255,.85);font-size:15px}
+.btn.ghost{background:var(--card);color:var(--ink);border:2px solid var(--line);font-size:16px;padding:12px}
+.btn.ghost .hi{color:var(--muted)}
+.btn.small{font-size:15px;padding:10px}
+.btn:disabled{opacity:.5}
+.btn + .btn{margin-top:10px}
+ul.check{margin:0;padding:0;list-style:none;font-size:14.5px}
+ul.check li{padding:7px 0 7px 30px;position:relative;border-top:1px solid var(--line)}
+ul.check li:first-child{border-top:0}
+ul.check li::before{content:"";position:absolute;left:4px;top:11px;width:14px;height:14px;border-radius:50%;border:2px solid var(--blue)}
+.note{font-size:13px;color:var(--muted)}
+.banner{border-radius:12px;padding:11px 12px;font-size:14px;margin-bottom:12px;display:none}
+.banner.on{display:block}
+.banner.warn{background:var(--amberbg);color:var(--amber)}
+.banner.bad{background:var(--redbg);color:var(--red)}
+.banner.ok{background:var(--greenbg);color:var(--green)}
+.banner b{display:block;margin-bottom:2px}
+/* tracking screen */
+.status{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.status>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.status .v{font:800 20px/1.1 var(--sans);font-variant-numeric:tabular-nums}
+.status .k{font-size:11.5px;color:var(--muted);margin-top:2px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chip{font:700 13px var(--sans);padding:6px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--muted)}
+.chip.good{background:var(--greenbg);color:var(--green);border-color:transparent}
+.chip.mid{background:var(--amberbg);color:var(--amber);border-color:transparent}
+.chip.bad{background:var(--redbg);color:var(--red);border-color:transparent}
+.stopbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-height:42vh;border:0;border-radius:24px;
+  background:var(--stop);color:#fff;font:900 34px/1.1 var(--sans);letter-spacing:-.01em;box-shadow:0 10px 30px rgba(22,163,74,.35);touch-action:manipulation;user-select:none}
+.stopbtn .hi{color:rgba(255,255,255,.9);font-size:24px;margin-top:6px}
+.stopbtn small{font:600 15px var(--sans);opacity:.9;margin-top:14px}
+.stopbtn:active{background:var(--stop2);transform:scale(.985)}
+.stopbtn.wait{background:#64748b;box-shadow:none}
+.flash{animation:flash .5s}
+@keyframes flash{0%{box-shadow:0 0 0 0 rgba(22,163,74,.9)}100%{box-shadow:0 0 0 26px rgba(22,163,74,0)}}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.row2 .btn{margin:0}
+.end{background:#dc2626;color:#fff}
+.hint{font-size:14px;color:var(--muted);margin:12px 2px 0}
+.runs .r{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.runs .r:first-of-type{border-top:0}
+.runs .r b{display:block;font-size:15px}
+.runs .r span{font-size:12.5px;color:var(--muted)}
+.runs .r button{font:700 14px var(--sans);padding:9px 12px;border-radius:10px;border:0;background:var(--blue);color:#fff}
+.hidden{display:none!important}
+.big{font:800 26px var(--sans)}
+dialog{border:0;border-radius:18px;padding:18px;max-width:340px;background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ setup ============ -->
+  <section id="setup">
+    <h1>Bus GPS tracker <span class="hi">बस GPS ट्रैकर</span></h1>
+    <p class="lead">Records where the bus goes and where it stops. The file stays on this phone until you send it.</p>
+
+    <div class="banner warn" id="bBrowser"><b>Open this page in Chrome</b>Tracking is most reliable in Google Chrome. Copy the link and open it in Chrome.</div>
+    <div class="banner bad" id="bInsecure"><b>This page needs a secure link</b>Open it from the https:// address, not a saved file.</div>
+    <div class="banner warn" id="bResume"><b>A run was not finished</b><span id="resumeTxt"></span>
+      <div class="row2"><button class="btn small" id="resumeGo">Continue tracking</button><button class="btn small ghost" id="resumeEnd">Finish and save</button></div></div>
+
+    <div class="card">
+      <label class="f" for="route">Bus route <span class="hi" style="display:inline">· रूट</span></label>
+      <select id="route"></select>
+      <div class="seg" role="group" aria-label="Run">
+        <button id="sAm" aria-pressed="true">Morning<span class="hi">सुबह · to school</span></button>
+        <button id="sPm" aria-pressed="false">Afternoon<span class="hi">दोपहर · from school</span></button>
+      </div>
+    </div>
+
+    <div class="card">
+      <ul class="check">
+        <li><b>Location ON</b>, and allow <b>precise</b> location when Chrome asks. <span class="hi">लोकेशन चालू रखें</span></li>
+        <li id="ckWhere"></li>
+        <li>Keep <b>this screen open</b> for the whole run. The screen will stay on by itself. <span class="hi">यह स्क्रीन खुली रखें</span></li>
+        <li>Phone charged, or on a charger.</li>
+      </ul>
+    </div>
+
+    <button class="btn" id="start">Start tracking<span class="hi">ट्रैकिंग शुरू करें</span></button>
+    <p class="note" style="margin-top:10px">Then tap the big green button every time the bus stops to pick up or drop children.</p>
+
+    <div class="card runs hidden" id="runsCard" style="margin-top:16px">
+      <label class="f">Saved runs on this phone</label>
+      <div id="runs"></div>
+    </div>
+  </section>
+
+  <!-- ============ tracking ============ -->
+  <section id="track" class="hidden">
+    <div class="chips"><span class="chip" id="cRun"></span><span class="chip" id="cGps">GPS: waiting</span><span class="chip" id="cAwake">Screen</span></div>
+    <div class="banner warn" id="bApprox"><b>Precise location is off</b>Tap the icon left of the web address, then Permissions, then Location: turn on <b>Use precise location</b>.</div>
+    <div class="banner bad" id="bDenied"><b>Location is blocked</b>Tap the icon left of the web address, then Permissions, then Location: <b>Allow</b>. Also turn Location on in the phone's quick settings.</div>
+    <div class="banner warn" id="bGap"></div>
+    <div class="banner warn" id="bWeak"><b>Weak GPS signal</b>Keep the phone near a window. Turn on Google Location Accuracy in Settings, Location.</div>
+    <div class="status">
+      <div><div class="v" id="tTime">0:00</div><div class="k">time</div></div>
+      <div><div class="v" id="tKm">0.0</div><div class="k">km</div></div>
+      <div><div class="v" id="tStops">0</div><div class="k">stops tapped</div></div>
+    </div>
+    <button class="stopbtn" id="stopBtn">BUS STOPPED<span class="hi">बस रुकी</span><small id="stopSub">Tap at every stop</small></button>
+    <p class="hint" id="hint"></p>
+    <div class="row2">
+      <button class="btn ghost small" id="undo" disabled>Undo last stop</button>
+      <button class="btn small end" id="endBtn">End run<span class="hi">यात्रा खत्म</span></button>
+    </div>
+  </section>
+
+  <!-- ============ done ============ -->
+  <section id="done" class="hidden">
+    <h1>Run saved <span class="hi">यात्रा सेव हो गई</span></h1>
+    <p class="lead" id="doneTxt"></p>
+    <div class="banner warn" id="bThin"></div>
+    <button class="btn" id="share">Send on WhatsApp<span class="hi">व्हाट्सऐप पर भेजें</span></button>
+    <button class="btn ghost" id="save">Save file to phone</button>
+    <button class="btn ghost" id="again">Start another run</button>
+    <p class="note" style="margin-top:12px">Send the file to the transport project number. It is also kept below the Start button on this phone.</p>
+  </section>
+</div>
+
+<dialog id="dlg"><p id="dlgTxt" style="margin:0 0 16px;font-size:17px"></p>
+  <div class="row2"><button class="btn small ghost" id="dlgNo">No</button><button class="btn small end" id="dlgYes">Yes</button></div></dialog>
+
+<script>
+"use strict";
+const ROUTES = __ROUTES__;                  // ["Route 1", ...] from the planner's data
+const $ = id => document.getElementById(id);
+const MAX_ACC_M = 40;        // fixes less certain than this are not used for the track
+const MAX_KMH = 130;         // a jump faster than this between fixes is a GPS glitch
+const TAP_FRESH_MS = 3000;   // a stop tap uses the latest fix if it is this recent ...
+const TAP_WAIT_MS = 10000;   // ... otherwise waits this long for a new one
+const GAP_S = 120;           // no fix for this long starts a new track segment
+const APPROX_M = 500;        // accuracy this poor means Android's "approximate location"
+const STEP_M = 15;           // km counter: movement smaller than this is GPS wobble while standing
+const SAVE_MS = 10000;
+const KEEP_RUNS = 6;
+const CREATOR = "Bus GPS tracker (web)";
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+
+/* ---------- geometry ---------- */
+function metres(a, b) {
+  const R = 6371000, r = Math.PI / 180, dLa = (b[0] - a[0]) * r, dLo = (b[1] - a[1]) * r;
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/* ---------- state ----------
+   run = { id, route, session, started, pts: [[lat, lon, tMs, accM, seg]], taps: [[lat, lon, tMs]],
+           seg, km, paused: [[fromMs, toMs]] }                                                      */
+let run = null, watchId = null, last = null, lastKept = null, anchor = null, pendingTap = null, wake = null,
+    hiddenAt = null, saveTimer = null, tickTimer = null, poorFixes = 0, session = "am";
+
+function newRun() {
+  const now = Date.now(), d = new Date(now);
+  const p = n => String(n).padStart(2, "0");
+  const route = $("route").value;
+  return { id: `R${route.replace(/\D/g, "")}_${session}_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`,
+           route, session, started: now, pts: [], taps: [], seg: 0, km: 0, paused: [] };
+}
+const save = () => { if (run) store.set("tracker-run", run); };
+
+/* ---------- GPS ---------- */
+function onFix(pos) {
+  const c = pos.coords, f = { lat: c.latitude, lon: c.longitude, acc: c.accuracy || 9999, t: pos.timestamp || Date.now(), got: Date.now() };
+  last = f;
+  showGps(f.acc);
+  if (f.acc > APPROX_M) { if (++poorFixes >= 3) $("bApprox").classList.add("on"); }
+  else { poorFixes = 0; $("bApprox").classList.remove("on"); }
+  $("bDenied").classList.remove("on");
+  if (!run) return;
+  if (f.acc <= MAX_ACC_M) {
+    const p = [round6(f.lat), round6(f.lon), f.t, Math.round(f.acc)];
+    let keep = true;
+    if (lastKept) {
+      const dt = (f.t - lastKept[2]) / 1000;
+      if (dt <= 0) keep = false;
+      else {
+        const m = metres(lastKept, p);
+        if (m / dt * 3.6 > MAX_KMH && dt < 60) keep = false;           // glitch
+        else {
+          if (dt > GAP_S) run.seg += 1;                                   // tracking was interrupted
+        }
+      }
+    }
+    if (keep) {
+      p.push(run.seg); run.pts.push(p); lastKept = p;
+      if (!anchor) anchor = p;
+      else { const d = metres(anchor, p); if (d >= STEP_M) { run.km += d / 1000; anchor = p; } }
+    }
+  }
+  if (pendingTap && f.acc <= MAX_ACC_M) commitTap(f);
+  render();
+}
+function onGeoError(e) {
+  if (e.code === 1) { $("bDenied").classList.add("on"); showGps(null, "blocked"); }
+  else showGps(null, e.code === 3 ? "searching" : "no signal");
+}
+function startWatch() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = navigator.geolocation.watchPosition(onFix, onGeoError,
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+const round6 = x => Math.round(x * 1e6) / 1e6;
+
+function showGps(acc, txt) {
+  const c = $("cGps");
+  if (acc == null) { c.textContent = `GPS: ${txt}`; c.className = "chip bad"; return; }
+  const m = Math.round(acc);
+  c.textContent = acc <= 15 ? `GPS good · ${m} m` : acc <= MAX_ACC_M ? `GPS ok · ${m} m` : `GPS weak · ${m} m`;
+  c.className = "chip " + (acc <= 15 ? "good" : acc <= MAX_ACC_M ? "mid" : "bad");
+  $("bWeak").classList.toggle("on", acc > MAX_ACC_M && acc <= APPROX_M && !!run);
+}
+
+/* ---------- stop taps ---------- */
+function tapStop() {
+  if (!run || pendingTap) return;
+  if (navigator.vibrate) navigator.vibrate(60);
+  const now = Date.now();
+  if (last && now - last.got <= TAP_FRESH_MS && last.acc <= MAX_ACC_M) { commitTap(last); return; }
+  pendingTap = { at: now };
+  $("stopBtn").classList.add("wait"); $("stopSub").textContent = "Getting position… keep still";
+  setTimeout(() => {                    // no good fix arrived: use the best recent one
+    if (!pendingTap) return;
+    if (last && Date.now() - last.got < 30000) commitTap(last, true);
+    else { pendingTap = null; resetStopBtn(); alertMsg("No GPS position yet. Wait for the GPS chip to turn green, then tap again."); }
+  }, TAP_WAIT_MS);
+}
+function commitTap(f, weak) {
+  pendingTap = null;
+  run.taps.push([round6(f.lat), round6(f.lon), f.t]);
+  save();
+  resetStopBtn();
+  const b = $("stopBtn"); b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash");
+  $("stopSub").textContent = `Stop ${run.taps.length} saved${weak ? " (weak GPS)" : ""} · ${clock(f.t)}`;
+  render();
+}
+function resetStopBtn() { $("stopBtn").classList.remove("wait"); $("stopSub").textContent = "Tap at every stop"; }
+
+/* ---------- screen on ---------- */
+async function keepAwake() {
+  try {
+    if ("wakeLock" in navigator && document.visibilityState === "visible") {
+      wake = await navigator.wakeLock.request("screen");
+      wake.addEventListener("release", () => { wake = null; showAwake(); });
+    }
+  } catch (e) { wake = null; }
+  showAwake();
+}
+function showAwake() {
+  const c = $("cAwake");
+  if (wake) { c.textContent = "Screen stays on"; c.className = "chip good"; }
+  else if (!("wakeLock" in navigator)) { c.textContent = "Set screen timeout to 30 min"; c.className = "chip mid"; }
+  else { c.textContent = "Screen may sleep"; c.className = "chip mid"; }
+}
+document.addEventListener("visibilitychange", () => {
+  if (!run) return;
+  if (document.visibilityState === "hidden") { hiddenAt = Date.now(); save(); return; }
+  keepAwake();
+  if (hiddenAt && Date.now() - hiddenAt > 20000) {
+    run.paused.push([hiddenAt, Date.now()]);
+    const min = Math.round((Date.now() - hiddenAt) / 60000);
+    const g = $("bGap");
+    g.innerHTML = `<b>Tracking stopped for ${min < 1 ? "under a minute" : min + " min"}</b>The phone left this screen. Keep this page open on the screen until the run ends.`;
+    g.classList.add("on");
+    setTimeout(() => g.classList.remove("on"), 15000);
+  }
+  hiddenAt = null;
+});
+window.addEventListener("pagehide", save);
+window.addEventListener("beforeunload", e => { if (run) { save(); e.preventDefault(); e.returnValue = ""; } });
+
+/* ---------- screens ---------- */
+function show(id) { ["setup", "track", "done"].forEach(s => $(s).classList.toggle("hidden", s !== id)); window.scrollTo(0, 0); }
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const clock = t => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+// finished run's length from the GPS clock (first to last fix); a replayed or resumed run is not mis-timed
+const duration = r => r.pts.length > 1 ? r.pts[r.pts.length - 1][2] - r.pts[0][2] : (r.ended || Date.now()) - r.started;
+
+function render() {
+  if (!run) return;
+  const s = Math.max(0, Math.round((Date.now() - run.started) / 1000));   // live: wall clock, ticks every second
+  $("tTime").textContent = `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor(s / 60) % 60).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(s % 60).padStart(2, "0")}`;
+  $("tKm").textContent = run.km.toFixed(1);
+  $("tStops").textContent = run.taps.length;
+  $("undo").disabled = !run.taps.length;
+}
+
+function beginTracking(resume) {
+  if (!resume) run = newRun();
+  lastKept = anchor = run.pts.length ? run.pts[run.pts.length - 1] : null;
+  $("cRun").textContent = `${run.route} · ${run.session === "am" ? "Morning" : "Afternoon"}`;
+  $("hint").textContent = run.session === "am"
+    ? "Tap at every pickup, and once more when the bus reaches school. Then End run."
+    : "Tap once at school before the bus leaves, then at every drop. End run after the last drop.";
+  show("track"); save(); render();
+  startWatch(); keepAwake();
+  clearInterval(saveTimer); saveTimer = setInterval(save, SAVE_MS);
+  clearInterval(tickTimer); tickTimer = setInterval(render, 1000);
+}
+
+function archive(r) {             // keep a finished run in the phone's list of saved runs
+  r.ended = r.ended || Date.now();
+  let runs = store.get("tracker-runs", []).filter(x => x.id !== r.id);
+  runs.unshift(r);
+  runs = runs.slice(0, KEEP_RUNS);
+  while (runs.length && !store.set("tracker-runs", runs)) runs.pop();     // storage full: drop oldest
+}
+
+function finish() {
+  if (pendingTap && last && Date.now() - last.got < 30000) commitTap(last, true);   // tapped, then ended at once
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = null; clearInterval(saveTimer); clearInterval(tickTimer);
+  if (wake) { wake.release().catch(() => {}); wake = null; }
+  const done = run; run = null; pendingTap = null; lastKept = anchor = null;
+  store.del("tracker-run");
+  archive(done);
+  showDone(done);
+}
+
+function showDone(r) {
+  current = r;
+  const min = Math.round(duration(r) / 60000);
+  $("doneTxt").textContent = `${r.route}, ${r.session === "am" ? "morning" : "afternoon"}: ${min} min, ${r.km.toFixed(1)} km, ${plural(r.taps.length, "stop")} tapped, ${r.pts.length} GPS points.`;
+  const thin = [];
+  if (r.pts.length < 30) thin.push("Very few GPS points were recorded. Check that Location is on and precise.");
+  if (!r.taps.length) thin.push("No stops were tapped, so stop times cannot be measured from this run.");
+  $("bThin").textContent = thin.join(" ");
+  $("bThin").classList.toggle("on", thin.length > 0);
+  show("done");
+}
+
+/* ---------- GPX ---------- */
+const iso = t => new Date(t).toISOString();
+// <hdop> carries the phone's accuracy estimate / 5 m, a rough conversion for GPX readers;
+// gps_runs.py does not use it (fixes worse than MAX_ACC_M are already left out).
+function gpx(r) {
+  const name = `${r.route} ${r.session}`;
+  const L = [`<?xml version="1.0" encoding="UTF-8"?>`,
+    `<gpx version="1.1" creator="${CREATOR}" xmlns="http://www.topografix.com/GPX/1/1">`,
+    ` <metadata><name>${name}</name><desc>route=${r.route.replace(/\D/g, "")} session=${r.session}</desc><time>${iso(r.started)}</time></metadata>`];
+  r.taps.forEach((w, i) => L.push(` <wpt lat="${w[0]}" lon="${w[1]}"><time>${iso(w[2])}</time><name>Stop ${i + 1}</name></wpt>`));
+  L.push(` <trk><name>${name}</name>`);
+  let seg = null;
+  r.pts.forEach(p => {
+    if (p[4] !== seg) { if (seg !== null) L.push(`  </trkseg>`); L.push(`  <trkseg>`); seg = p[4]; }
+    L.push(`   <trkpt lat="${p[0]}" lon="${p[1]}"><time>${iso(p[2])}</time><hdop>${(p[3] / 5).toFixed(1)}</hdop></trkpt>`);
+  });
+  if (seg !== null) L.push(`  </trkseg>`);
+  L.push(` </trk>`, `</gpx>`, ``);
+  return L.join("\n");
+}
+let current = null;
+function download(r) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([gpx(r)], { type: "application/gpx+xml" }));
+  a.download = r.id + ".gpx"; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+async function share(r) {
+  // Chrome on Android shares only some file types; .gpx is not one, .txt is.
+  // gps_runs.py reads the file whatever it is called.
+  const text = gpx(r);
+  const tries = [new File([text], r.id + ".gpx", { type: "application/gpx+xml" }),
+                 new File([text], r.id + ".gpx.txt", { type: "text/plain" })];
+  for (const f of tries) {
+    if (navigator.canShare && navigator.canShare({ files: [f] })) {
+      try { await navigator.share({ files: [f], title: r.id, text: `Bus GPS run ${r.id}` }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+  }
+  download(r);
+  alertMsg("The file was saved to Downloads. In WhatsApp tap the paperclip, then Document, and pick it.");
+}
+
+/* ---------- saved runs ---------- */
+function listRuns() {
+  const runs = store.get("tracker-runs", []);
+  $("runsCard").classList.toggle("hidden", !runs.length);
+  $("runs").innerHTML = runs.map((r, i) => `<div class="r"><div><b>${r.route} · ${r.session === "am" ? "Morning" : "Afternoon"}</b>
+    <span>${new Date(r.started).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} ${clock(r.started)} · ${plural(r.taps.length, "stop")} · ${r.km.toFixed(1)} km</span></div>
+    <button data-i="${i}">Send</button></div>`).join("");
+  $("runs").querySelectorAll("[data-i]").forEach(b => b.onclick = () => share(runs[+b.dataset.i]));
+}
+
+/* ---------- small dialogs ---------- */
+function ask(text) {
+  return new Promise(res => {
+    const d = $("dlg"); $("dlgTxt").textContent = text; $("dlgYes").classList.remove("hidden"); $("dlgNo").textContent = "No";
+    $("dlgYes").onclick = () => { d.close(); res(true); }; $("dlgNo").onclick = () => { d.close(); res(false); };
+    d.showModal();
+  });
+}
+function alertMsg(text) {
+  const d = $("dlg"); $("dlgTxt").textContent = text; $("dlgYes").classList.add("hidden"); $("dlgNo").textContent = "OK";
+  $("dlgNo").onclick = () => d.close(); d.showModal();
+}
+
+/* ---------- setup ---------- */
+function setSession(s) {
+  session = s;
+  $("sAm").setAttribute("aria-pressed", s === "am"); $("sPm").setAttribute("aria-pressed", s === "pm");
+  $("ckWhere").innerHTML = s === "am"
+    ? "Start at the <b>first pickup</b>, before the bus moves off. <span class=\"hi\">पहले स्टॉप से शुरू करें</span>"
+    : "Start <b>at school</b>, before the bus leaves. <span class=\"hi\">स्कूल से शुरू करें</span>";
+}
+function init() {
+  ROUTES.forEach(r => { const o = document.createElement("option"); o.value = o.textContent = r; $("route").appendChild(o); });
+  const prev = store.get("tracker-prefs", {});
+  if (prev.route && ROUTES.includes(prev.route)) $("route").value = prev.route;
+  setSession(new Date().getHours() < 11 ? "am" : "pm");
+  $("sAm").onclick = () => setSession("am"); $("sPm").onclick = () => setSession("pm");
+  $("route").onchange = () => store.set("tracker-prefs", { route: $("route").value });
+
+  const ua = navigator.userAgent;
+  $("bBrowser").classList.toggle("on", /PHX|OPR|Opera|SamsungBrowser|UCBrowser|wv\)/.test(ua) || !/Chrome\//.test(ua) && /Android/.test(ua));
+  $("bInsecure").classList.toggle("on", !window.isSecureContext || !navigator.geolocation);
+
+  $("start").onclick = () => {
+    const open = store.get("tracker-run", null);
+    if (open && open.pts && open.pts.length) archive(open);              // never lose an unfinished run
+    $("bResume").classList.remove("on");
+    store.set("tracker-prefs", { route: $("route").value }); beginTracking(false);
+  };
+  $("stopBtn").onclick = tapStop;
+  $("undo").onclick = async () => { if (run && run.taps.length && await ask(`Remove stop ${run.taps.length}?`)) { run.taps.pop(); save(); render(); resetStopBtn(); } };
+  $("endBtn").onclick = async () => { if (await ask(run.session === "am" ? "Has the bus reached school? End this run?" : "Was that the last drop? End this run?")) finish(); };
+  $("share").onclick = () => current && share(current);
+  $("save").onclick = () => current && download(current);
+  $("again").onclick = () => { listRuns(); show("setup"); };
+
+  const open = store.get("tracker-run", null);
+  if (open && open.pts) {
+    $("resumeTxt").textContent = `${open.route}, ${open.session === "am" ? "morning" : "afternoon"}, started ${clock(open.started)}: ${plural(open.taps.length, "stop")} tapped.`;
+    $("bResume").classList.add("on");
+    $("resumeGo").onclick = () => { run = open; run.seg += 1; $("bResume").classList.remove("on"); beginTracking(true); };
+    $("resumeEnd").onclick = () => { run = open; $("bResume").classList.remove("on"); finish(); };
+  }
+  listRuns();
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("track-sw.js").catch(() => {});
+}
+init();
+window.__tracker = { gpx: () => gpx(run || current), state: () => run || current, tapStop, finish };  // used by the tests
+</script>
+</body>
+</html>

@@ -37,6 +37,20 @@ ROOT = Path(__file__).resolve().parent.parent
 STATICRYPT = "staticrypt@3.5.4"
 ROBOTS = "User-agent: *\nDisallow: /\n"     # keep the lock page out of search results
 NOINDEX = '<meta name="robots" content="noindex, nofollow">'
+TRACK_LINK = """
+                    <div class="track-alt">
+                        <p>Bus staff: log a bus run with your phone's GPS. No password needed.</p>
+                        <a href="track.html">Start GPS tracking<span>GPS ट्रैकिंग शुरू करें</span></a>
+                    </div>"""
+TRACK_CSS = """
+            .staticrypt-page { width: auto; max-width: 360px; padding: 8% 16px 0; }
+            .staticrypt-form { padding: 36px 28px; }
+            .track-alt { margin-top: 26px; padding-top: 20px; border-top: 1px solid #eee; font-size: 13px; color: #555; }
+            .track-alt p { margin: 0 0 10px; }
+            .track-alt a { display: block; padding: 13px; border: 2px solid #3b82f6; color: #1d4ed8;
+                           text-decoration: none; font-weight: 700; font-size: 15px; text-transform: uppercase; }
+            .track-alt a span { display: block; text-transform: none; font-weight: 600; font-size: 13px; margin-top: 2px; }
+"""
 
 
 def ensure_salt() -> str:
@@ -73,6 +87,9 @@ def main() -> int:
         if r.returncode != 0:
             print(r.stdout + r.stderr, file=sys.stderr)
             return r.returncode
+        # the GPS tracker is public: it holds route names only (build_routes.render_tracker)
+        for f in ["track.html"] + build_routes.TRACKER_FILES:
+            (site / f).write_bytes((Path(tmp) / f).read_bytes())
     (site / "robots.txt").write_text(ROBOTS, encoding="utf-8")
     out = site / "index.html"
     text = out.read_text(encoding="utf-8")
@@ -80,8 +97,12 @@ def main() -> int:
     # site is not, so the lock page also says it itself.
     if NOINDEX not in text:
         text = text.replace("<head>", "<head>\n    " + NOINDEX, 1)
-        out.write_text(text, encoding="utf-8")
+    if "track-alt" not in text:    # bus staff reach the tracker without the password
+        text = text.replace("</form>", "</form>" + TRACK_LINK, 1).replace("</style>", TRACK_CSS + "</style>", 1)
+    out.write_text(text, encoding="utf-8")
     leaks = [k for k in ("GOOGLE_MAPS", "AIza", "riders", "Prometheus") if k in text]
+    track = (site / "track.html").read_text(encoding="utf-8")
+    leaks += [f"track.html: {k}" for k in ("AIza", "riders", '"lat"', "Prometheus") if k in track]
     if leaks:                      # the plain page must never reach site/
         out.unlink()
         print(f"site/index.html still contained {leaks}; not encrypted? Deleted it.", file=sys.stderr)

@@ -269,6 +269,18 @@ before and after.
 
 ### GPS runs (`pipeline/gps_runs.py`)
 
+Runs now usually come from the web tracker (`site/track.html`, built from
+`pipeline/track_template.html`): its files carry `route=N session=am|pm` in the GPX
+metadata, so `python pipeline/gps_runs.py R11_am_2026-10-14_0702.gpx.txt --apply-pins`
+needs no `--route`/`--session`. Phone GPS is noisier than the first iPhone run, so stop
+detection is robust to it: the stop's centre is the median of the track 5 s either side
+of the tap (`CENTRE_S`); the bus has arrived/left only after `EXIT_S` = 4 s in a row
+outside the 25 m circle; a bus that pulls forward up to `CREEP_M` = 35 m and stands again
+within `CREEP_S` = 8 s (10 s still, `REST_S`/`REST_M`) is still at the same stop; distance
+is measured on a 5 s rolling median with 10 m minimum steps, so jitter at rest adds
+nothing. On the Route 11 iPhone run these changes move no stop time by more than 1 s.
+
+
 ```bash
 python pipeline/gps_runs.py "Self Tracking R11.gpx" --route 11 --session am --apply-pins
 python pipeline/build_routes.py
