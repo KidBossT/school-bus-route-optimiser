@@ -6,8 +6,8 @@ Read a bus run logged on a phone (GPX) and turn it into ground truth.
     python pipeline/gps_runs.py R11_am_2026-10-14_0702.gpx.txt     # from the web tracker
 
 Files from the web tracker (site/track.html) say their own route and session, so
---route and --session can be left out; a .gpx.txt name (how WhatsApp receives
-them from Android) is read like any GPX.
+--route and --session can be left out; a renamed file (".gpx.txt", "(1).gpx") is
+read like any GPX.
 
 The phone logs a continuous track and the person on the bus taps once at each
 stop (a waypoint: "Add waypoint" in Open GPX Tracker, Annotate in GPSLogger).

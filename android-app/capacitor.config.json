@@ -1,0 +1,8 @@
+{
+  "appId": "com.kidbosst.busgps",
+  "appName": "Bus GPS",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

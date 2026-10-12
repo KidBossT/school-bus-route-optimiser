@@ -86,10 +86,18 @@ flowchart LR
   vehicle-routing solver with time windows: Clarke-Wright savings construction,
   relocate / swap / 2-opt / 2-opt\* local search, then ruin-and-recreate.
 
-### GPS tracker (phone web app)
+### GPS tracker (phone web app and Android app)
 
-Bus staff log a run from the browser on their own phones, with no app to install. Before this,
-the free Android logger used for the first run (GPSLogger) had left Google Play.
+Bus staff log a run on their own phones, either in Chrome or in the **Bus GPS** Android app,
+which is the same page wrapped with Capacitor. Before this, the free Android logger used for
+the first run (GPSLogger) had left Google Play.
+
+- **In the app** the GPS comes from a native foreground service (one high-accuracy fix a
+  second, with a "recording this run" notification), so a run keeps recording with the
+  screen locked or another app open: the didi can unlock, tap, and lock again. If the app is
+  closed mid-run, opening it again carries on by itself. In Chrome the screen has to stay on.
+- GPS starts when the page opens, so it has settled by the first stop; a stop tap waits up
+  to 10 s for a fix within 20 m and otherwise takes the best one it saw.
 
 - Records a continuous GPS track (`watchPosition`, high accuracy, about one fix a second)
   and one waypoint per stop from a large **BUS STOPPED / बस रुकी** button; English and Hindi labels.
@@ -98,7 +106,9 @@ the free Android logger used for the first run (GPSLogger) had left Google Play.
 - Filters fixes worse than 40 m and jumps faster than 130 km/h; detects Android's
   "approximate location" and a blocked permission, and says how to fix each.
 - Writes the same GPX that `gps_runs.py` reads, with the route and session inside, and
-  shares it straight to WhatsApp (as `.gpx.txt`, the file type Chrome on Android can share).
+  saves it on the phone as soon as the run is ended (app: `Documents/BusGPS/`, web page:
+  Downloads). Nothing is sent from the phone: the IT team collects the phones and emails
+  the files. A backup copy of the last 12 runs stays in the tracker itself.
 
 **Tested** by replaying the real Route 11 GPS run through the page: the clean replay
 reproduces every stop to within 1 s and 0.1 m. With phone-grade noise added (drifting
@@ -138,6 +148,19 @@ python pipeline/gps_runs.py R11_am_2026-10-14_0702.gpx.txt --apply-pins   # a tr
 python -m unittest discover tests
 ```
 
+### Android app
+
+```bash
+python pipeline/build_apk.py         # dist/bus-gps.apk, signed (needs JDK 21 + Android SDK 36)
+```
+
+`android-app/` is the Capacitor project (Capacitor 8, background-geolocation, share,
+filesystem); the page inside it is built from `pipeline/track_template.html`, so the app
+and `site/track.html` never drift apart. The signing key is created on the first build
+outside the repository (`APK_KEYSTORE`, `APK_KEYSTORE_PASSWORD` in `.env`); every update must
+be signed with it, so keep a backup. Installed by sending the APK on WhatsApp ("install
+unknown apps" once per phone).
+
 ### Publishing
 
 ```bash
@@ -161,6 +184,8 @@ pipeline/
   build_routes.py      stop-order search and the planner page
   gps_runs.py          GPX ingestion, stop detection and alignment
   track_template.html  phone GPS tracker (track_assets/: offline cache, app icons)
+  build_apk.py         the tracker as a signed Android app
+android-app/           Capacitor project for the Bus GPS app
   build_site.py        encrypted copy for the web
   optimiser/           network-wide vehicle-routing solver
   routes_template.html planner front end (Google Maps, no framework)

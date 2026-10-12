@@ -1,0 +1,16 @@
+{
+  "name": "bus-gps-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android wrapper for the bus GPS tracker page (site/track.html), with a native background location service.",
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "1.2.26",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/filesystem": "8.1.3",
+    "@capacitor/share": "8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

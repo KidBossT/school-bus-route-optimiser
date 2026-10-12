@@ -22,3 +22,7 @@ __pycache__/
 
 # atomic-write temp files
 *.tmp
+
+# Android app: build outputs and local SDK path (signing key lives outside the repo)
+dist/
+android-app/android/local.properties
