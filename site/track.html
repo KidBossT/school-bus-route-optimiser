@@ -219,7 +219,16 @@ function newRun() {
   return { id: `R${route.replace(/\D/g, "")}_${session}_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`,
            route, session, started: now, pts: [], taps: [], seg: 0, km: 0, paused: [] };
 }
-const save = () => { if (run) store.set("tracker-run", run); };
+// The run in progress comes first: if storage is full (a week of long runs at ~2 fixes
+// a second), drop the oldest backup copies, whose files are already in Documents/BusGPS.
+const save = () => {
+  if (!run) return;
+  while (!store.set("tracker-run", run)) {
+    const runs = store.get("tracker-runs", []);
+    if (!runs.length) break;
+    runs.pop(); store.set("tracker-runs", runs);
+  }
+};
 
 /* ---------- GPS ---------- */
 function onFix(pos) {
