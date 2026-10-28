@@ -33,14 +33,19 @@ class OptimiserConfig:
     default_capacity: int = 40            # ASSUMPTION: seats per bus, not in any file
     capacity_by_route: dict = field(default_factory=dict)   # {"R07": 32, ...}
     extra_vehicles: int = 0               # spare buses the solver may add
+    closed_vehicles: list = field(default_factory=list)   # buses that keep exactly today's stops, e.g. no GPS
+                                                          # to check their runs, or not known to be running
     # --- time rules -------------------------------------------------------
-    max_ride_min: float = 75.0            # ASSUMPTION: longest a child may ride
+    max_ride_min: float = 75.0            # ASSUMPTION: longest a child may ride ...
+    never_worse_than_today: bool = True   # ... except on a bus whose run is longer today: it may keep
+                                          # today's length (R3/R22 afternoons take 100+ min of road)
     earliest_pickup_min: float = 6 * 60   # ASSUMPTION: no pickup before 06:00
     dismissal_min: float = 14 * 60 + 50   # ASSUMPTION: buses leave school 14:50
     latest_drop_min: float = 16 * 60 + 45 # ASSUMPTION: last drop by 16:45
     dwell_base_min: float = 0.75          # bus stops, doors open
     dwell_per_student_min: float = 0.25   # each child boarding / alighting
     school_dwell_min: float = 5.0         # loading at school before the PM run
+    include_staff: bool = True            # teachers and staff ride too: they take seats, their stops are served
     # --- travel times -----------------------------------------------------
     matrix_provider: str = "haversine"    # haversine | osrm | google | google_static
     use_calibration: bool = True          # scale times with cache/calibration.json when present
@@ -48,11 +53,19 @@ class OptimiserConfig:
     time_multiplier_pm: float = 1.0
     haversine_detour: float = 1.35        # road km per straight-line km
     haversine_speed_kmh: float = 22.0     # NCR peak-hour average, rough
+    traffic_scale: str | float = "auto"   # google_static only: x traffic/no-traffic, "auto" = measured on the
+                                          # pairs the route planner priced with traffic (cache), or a number
     neighbours: int = 15                  # real road times only for k nearest
     # --- data readiness ---------------------------------------------------
     require_verified: bool = True         # only human-verified coordinates...
     allow_corroborated: bool = False      # ...or ones 2+ independent sources agree on (draft)
     min_confidence: str = "medium"        # when unverified points are allowed
+    lock_unverified: bool = True          # a stop without a verified point is still routed (its time counts)
+                                          # but stays on today's bus; only verified stops move between buses
+    gps_campaign: bool = True             # for those, use where the bus really stands (cache/gps_campaign.json)
+    draft_gps: bool = False               # DRAFT: also move stops whose GPS place is sure but name unconfirmed
+    draft_all: bool = False               # DRAFT ceiling: every stop may move (open buses only), as placed
+    reorder_only: bool = False            # baseline: every bus keeps its stops, only their order changes
     # --- stop consolidation ----------------------------------------------
     merge_radius_m: float = 250.0         # walk distance for a merge proposal
     apply_stop_merges: bool = False       # proposals only unless switched on

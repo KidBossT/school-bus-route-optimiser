@@ -44,6 +44,7 @@ OSRM = "https://router.project-osrm.org"
 OSRM_CHUNK = 25          # origins per table request
 GOOGLE_TRAFFIC_ELEMENTS = gmaps.MAX_MATRIX_ELEMENTS_TRAFFIC_OPTIMAL
 GOOGLE_EPM = 2_500       # elements per minute; Google's limit is 3,000
+ESTIMATE_BANDS_KM = [(0, 1), (1, 2), (2, 4), (4, 8), (8, 1e9)]   # straight-line km, for estimated pairs
 
 
 def haversine_matrix(points: list[tuple[float, float]]) -> np.ndarray:
@@ -230,14 +231,24 @@ class MatrixBuilder:
                 rt = np.array([v[0] / 60.0 for v in real.values()])
                 rk = np.array([v[1] / 1000.0 for v in real.values()])
                 ok = T[idx] > 0.05
-                # calibrate the estimate on this network's real pairs
+                # calibrate the estimate on this network's real pairs, per straight-line distance
+                # band: one factor fits the many short neighbour hops and leaves long legs (a 16 km
+                # run to school) at the 22 km/h of a lane, twice their real time
                 ft = float(np.median(rt[ok] / T[idx][ok])) if ok.any() else 1.0
                 fk = float(np.median(rk[ok] / K[idx][ok])) if ok.any() else 1.0
-                T, K = T * ft, K * fk
+                F = np.full_like(T, ft)
+                hr, bands = H[idx], []
+                for lo, hi in ESTIMATE_BANDS_KM:
+                    sel = ok & (hr >= lo) & (hr < hi)
+                    if sel.sum() >= 20:
+                        f = float(np.median(rt[sel] / T[idx][sel]))
+                        F[(H >= lo) & (H < hi)] = f
+                        bands.append(f"{lo}-{hi if hi < 1e9 else ''} km x{f:.2f}")
+                T, K = T * F, K * fk
                 T[idx], K[idx] = rt, rk
                 est[idx] = False
                 self.log(f"    {len(real)} real road times, {int(est.sum())} estimated "
-                         f"(time x{ft:.2f}, km x{fk:.2f} vs straight-line model)")
+                         f"(time {', '.join(bands) or f'x{ft:.2f}'}; km x{fk:.2f} vs straight-line model)")
         np.fill_diagonal(T, 0.0)
         np.fill_diagonal(K, 0.0)
         return T * multiplier, K, est

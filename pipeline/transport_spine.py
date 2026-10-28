@@ -256,16 +256,22 @@ def parse_route_list(path: str | Path, audit: AuditLog | None = None) -> pd.Data
 # --------------------------------------------------------------------------
 
 _ADM = re.compile(r"^PRO\d+", re.I)
+STAFF_OR_STUDENT_ID = re.compile(r"^(?:PRO\d+|\d{5,6})$", re.I)   # staff: 5-6 digits (90281); S.No. is shorter
 _REPORTING = re.compile(
     r"Bus\s+Reporting\s+Time.*?:\s*(\d{1,2}[:.]\d{2}\s*[APap]\.?[Mm]\.?)", re.I
 )
 
 
-def parse_roster(path: str | Path, audit: AuditLog | None = None) -> pd.DataFrame:
+def parse_roster(path: str | Path, audit: AuditLog | None = None,
+                 id_pattern: re.Pattern | None = None) -> pd.DataFrame:
     """
     Long roster: one row per (student, route block) as printed. Students who are
     picked up by one route and dropped by another appear twice; that is resolved
     downstream in build_student_dim.
+
+    `id_pattern` decides which rows are riders: students only by default (PRO
+    numbers); STAFF_OR_STUDENT_ID also keeps the teachers and staff who ride,
+    listed with numeric IDs.
     """
     raw = pd.read_excel(path, header=None, dtype=object)
     current: str | None = None
@@ -287,7 +293,7 @@ def parse_roster(path: str | Path, audit: AuditLog | None = None) -> pd.DataFram
             reporting = parse_time_to_minutes(m.group(1))
             continue
 
-        adm = next((c for c in cells if _ADM.match(c)), "")
+        adm = next((c for c in cells if (id_pattern or _ADM).match(c)), "")
         if not adm:
             continue
         i = cells.index(adm)

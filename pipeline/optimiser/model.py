@@ -26,7 +26,8 @@ class Node:
     locked_vehicle: str | None = None   # must stay on this bus
     students: list[str] = field(default_factory=list)   # admission numbers
     printed_min: float | None = None    # time printed for parents today
-    verified: bool = False
+    verified: bool = False              # hand- or GPS-verified point: may move between buses
+    measured: bool = False              # the point is where a bus was measured standing (GPS)
 
 
 @dataclass
@@ -35,6 +36,8 @@ class Vehicle:
     capacity: int
     reserved_load: int = 0        # seats taken by children at stops we cannot route yet
     existing: bool = True         # False for a spare the solver may add
+    max_run_min: float | None = None   # this bus may run this long even past the ride limit (today's run)
+    closed: bool = False          # keeps exactly today's stops: no stop moves on or off it
 
 
 @dataclass

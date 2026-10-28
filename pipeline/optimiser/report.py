@@ -50,12 +50,50 @@ def student_changes(direction: str, routes: list[dict], nodes_by_id: dict) -> li
     return rows
 
 
+def stop_moves(direction: str, cur: list[dict], opt: list[dict]) -> list[dict]:
+    """One row per stop the proposal moves to another bus: who, from where to where, what it does to times."""
+    today = {s["node"]: (r["vehicle"], s) for r in cur for s in r["stops"]}
+    runs_today = {r["vehicle"]: r["duration_min"] for r in cur}
+    runs_new = {r["vehicle"]: r["duration_min"] for r in opt}
+    rows = []
+    for r in opt:
+        for s in r["stops"]:
+            was, t = today.get(s["node"], (s["was_on"], None))
+            if was == r["vehicle"]:
+                continue
+            rows.append({
+                "direction": direction, "stop": s["name"], "riders": s["children"],
+                "bus_today": was, "bus_proposed": r["vehicle"],
+                "time_today": clock(t["eta_min"]) if t else "", "time_proposed": clock(s["eta_min"]),
+                "ride_today_min": t["ride_min"] if t else None, "ride_proposed_min": s["ride_min"],
+                "run_today_min": runs_today.get(r["vehicle"]), "run_proposed_min": runs_new.get(r["vehicle"]),
+                "from_run_today_min": runs_today.get(was), "from_run_proposed_min": runs_new.get(was, 0.0),
+                "lat": s["lat"], "lon": s["lon"],
+            })
+    return rows
+
+
+def write_map(path: Path, plan: dict) -> Path:
+    """The proposal on a Google map: each bus's run, stops that change bus ringed."""
+    import gmaps
+    gmaps.load_env()
+    view = {k: plan[k] for k in ("generated", "input", "draft", "school")}
+    view["directions"] = {d: {k: D[k] for k in ("notes", "summary_current", "summary_optimised",
+                                                 "routes_current", "routes_optimised")}
+                          for d, D in plan["directions"].items()}
+    tpl = (Path(__file__).resolve().parent / "moves_template.html").read_text(encoding="utf-8")
+    path.write_text(tpl.replace("__GMAP_TAGS__", gmaps.browser_map_tags("light"))
+                    .replace("__DATA__", json.dumps(view, separators=(",", ":"), default=float).replace("</", "<\\/")),
+                    encoding="utf-8")
+    return path
+
+
 def write(out_dir: Path, results: dict, cfg_dict: dict, draft: bool, label: str) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().isoformat(timespec="seconds")
     plan = {"generated": stamp, "input": label, "draft": draft, "config": cfg_dict,
             "directions": {}}
-    changes, readiness, merges = [], [], []
+    changes, readiness, merges, moves = [], [], [], []
     md = [f"# Route optimisation - {label}", "",
           f"Generated {stamp}."]
     if draft:
@@ -74,12 +112,15 @@ def write(out_dir: Path, results: dict, cfg_dict: dict, draft: bool, label: str)
         # a stop no bus can serve inside the ride limit even on its own is
         # either a wrong pin or a limit/speed assumption that does not fit it
         T, S = ev.T, ev.S
+        nv = len(b.problem.vehicles)
         unreachable = [{"node": nd.id, "name": nd.name, "alone_min": round(T[0, j] + S[j], 1)}
                        for j, nd in enumerate(b.problem.nodes, start=1)
-                       if T[0, j] + S[j] > ev.max_duration([j])]
+                       if T[0, j] + S[j] > max(ev.max_duration([j], v) for v in range(nv))]
         plan["directions"][d]["unreachable_alone"] = unreachable
         nodes = {nd.id: nd for nd in b.problem.nodes}
         changes += student_changes(d, opt, nodes)
+        mv = stop_moves(d, cur, opt)
+        moves += mv
         readiness += b.readiness
         merges += [{"direction": d, "hub": m["hub_name"], "member": x["name"],
                     "walk_m": x["walk_m"], "children": x["children"],
@@ -104,25 +145,44 @@ def write(out_dir: Path, results: dict, cfg_dict: dict, draft: bool, label: str)
             a, o = sc[k], so[k]
             md.append(f"| {name} | {a}{' ' + unit if unit else ''} | {o}{' ' + unit if unit else ''} "
                       f"| {round(o - a, 3):+} |")
-        md += ["", "| Bus | Stops | Children | Seats | Run | Start | End | Longest ride |",
-               "|---|---:|---:|---:|---:|---:|---:|---:|"]
+        if mv:
+            md += ["", f"**{len(mv)} stops move to another bus** ({sum(m['riders'] for m in mv)} riders):", "",
+                   "| Stop | Riders | From | To | Time today | Proposed |", "|---|---:|---|---|---:|---:|"]
+            for m in sorted(mv, key=lambda m: (m["bus_today"], m["bus_proposed"])):
+                md.append(f"| {m['stop']} | {m['riders']} | {m['bus_today']} | {m['bus_proposed']} "
+                          f"| {m['time_today']} | {m['time_proposed']} |")
+        today_run = {x["vehicle"]: x["duration_min"] for x in cur}
+        md += ["", "| Bus | Stops | Riders | Seats | Run today | Run proposed | Start | End | Longest ride |",
+               "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for x in opt:
             md.append(f"| {x['vehicle']} | {len(x['stops'])} | {x['children']}"
                       f"{' (+' + str(x['reserved_seats']) + ' held)' if x['reserved_seats'] else ''} "
-                      f"| {x['capacity']} | {x['duration_min']} min | {clock(x['start_min'])} "
-                      f"| {clock(x['end_min'])} | {x['max_ride_min']} min |")
+                      f"| {x['capacity']} | {today_run.get(x['vehicle'], 0)} min | {x['duration_min']} min "
+                      f"| {clock(x['start_min'])} | {clock(x['end_min'])} | {x['max_ride_min']} min |")
+        gone = sorted(set(today_run) - {x["vehicle"] for x in opt})
+        if gone:
+            md.append(f"\nNot needed in the proposal: {', '.join(gone)}")
     md += ["", "## Files", "",
            "- `plan.json` - every route, stop, ETA and metric, today vs optimised",
            "- `student_changes.csv` - per child: bus today, bus proposed, time shift",
+           "- `stop_moves.csv` - per stop that changes bus: from, to, times and run lengths",
+           "- `map.html` - the proposal on a map (open with `python pipeline/serve.py`)",
            "- `readiness.csv` - which stops were routed and why the rest were held",
            "- `stop_merges.csv` - nearby stops that could become one",
            "", "Weights, limits and every ASSUMPTION are in `plan.json -> config` and "
            "can be changed in `optimiser_config.json`."]
 
+    if results:
+        plan["school"] = list(next(iter(results.values()))["built"].problem.school)
     (out_dir / "plan.json").write_text(json.dumps(plan, indent=1, default=float), encoding="utf-8")
+    write_map(out_dir / "map.html", plan)
     (out_dir / "summary.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     pd.DataFrame(changes).to_csv(out_dir / "student_changes.csv", index=False, encoding="utf-8-sig")
     pd.DataFrame(readiness).to_csv(out_dir / "readiness.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(moves, columns=["direction", "stop", "riders", "bus_today", "bus_proposed", "time_today",
+                                 "time_proposed", "ride_today_min", "ride_proposed_min", "run_today_min",
+                                 "run_proposed_min", "from_run_today_min", "from_run_proposed_min",
+                                 "lat", "lon"]).to_csv(out_dir / "stop_moves.csv", index=False, encoding="utf-8-sig")
     pd.DataFrame(merges, columns=["direction", "hub", "member", "walk_m", "children",
                                   "bus_today", "same_place"]).to_csv(
         out_dir / "stop_merges.csv", index=False, encoding="utf-8-sig")

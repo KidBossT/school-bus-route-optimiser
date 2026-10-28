@@ -8,8 +8,9 @@ every run, then compares the result with today's plan on the same metrics.
 
     python pipeline/run_optimiser.py --demo                    # synthetic network, no real data
     python pipeline/run_optimiser.py --allow-unverified        # DRAFT on geocoder guesses
+    python pipeline/run_optimiser.py --draft-gps               # DRAFT: GPS places with unconfirmed names move too
 
-Outputs go to outputs/optimiser/ (outputs/optimiser_demo/ for --demo).
+Outputs go to outputs/optimiser/ (outputs/optimiser_draft/ for --draft-gps, outputs/optimiser_demo/ for --demo).
 Settings: optimiser_config.json at the project root (see optimiser/config.py).
 """
 
@@ -29,6 +30,13 @@ from optimiser.solver import Solver
 
 
 def optimise(built, cfg, time_limit, log=print) -> dict:
+    if cfg.never_worse_than_today:
+        # a bus whose run is already longer than the ride limit may keep today's length (not more),
+        # so today's plan is not "in breach" for roads no plan can shorten, and nothing gets worse
+        ev0 = Evaluator(built.problem, cfg)
+        for v, seq in enumerate(built.current.routes):
+            if seq:
+                built.problem.vehicles[v].max_run_min = ev0.route_detail(seq, v)["duration_min"]
     ev = Evaluator(built.problem, cfg)
     solver = Solver(built.problem, ev, k=cfg.neighbours, seed=cfg.seed)
     starts = [("today", built.current), ("savings", solver.savings())]
@@ -49,6 +57,13 @@ def main(argv=None) -> int:
     ap.add_argument("--demo", action="store_true", help="run on a synthetic network")
     ap.add_argument("--allow-unverified", action="store_true",
                     help="route geocoder guesses too (output is marked DRAFT)")
+    ap.add_argument("--draft-gps", action="store_true",
+                    help="also move stops whose GPS place is sure but name unconfirmed (DRAFT)")
+    ap.add_argument("--draft-all", action="store_true",
+                    help="ceiling: every stop may move, confirmed or not (DRAFT)")
+    ap.add_argument("--reorder-only", action="store_true",
+                    help="baseline: no stop changes bus, only the order within each bus")
+    ap.add_argument("--out", help="output folder under outputs/ (default by mode)")
     ap.add_argument("--export-coord-template", action="store_true")
     ap.add_argument("--import-coords", metavar="FILE")
     a = ap.parse_args(argv)
@@ -56,6 +71,12 @@ def main(argv=None) -> int:
     cfg = OptimiserConfig.load(Path(a.config))
     if a.allow_unverified:
         cfg.require_verified = False
+    if a.draft_gps:
+        cfg.draft_gps = True
+    if a.draft_all:
+        cfg.draft_all = True
+    if a.reorder_only:
+        cfg.reorder_only = True
     limit = a.time_limit if a.time_limit is not None else cfg.time_limit_s
     inputs, outputs, cache = Path(a.inputs), Path(a.outputs), Path(a.cache)
     directions = ["am", "pm"] if a.direction == "both" else [a.direction]
@@ -77,7 +98,7 @@ def main(argv=None) -> int:
         print(f"\nwrote {path}")
         return 0
 
-    routes, students = build_problem.load_sources(inputs)
+    routes, students = build_problem.load_sources(inputs, cfg.include_staff)
     gc = build_problem.make_geocoder(routes, cache)
 
     if a.export_coord_template:
@@ -104,9 +125,13 @@ def main(argv=None) -> int:
         results[d] = optimise(built, cfg, limit)
     if not results:
         return 2
-    path = report.write(outputs / "optimiser", results, cfg.to_dict(),
-                        draft=not cfg.require_verified or cfg.allow_corroborated,
-                        label="Prometheus School")
+    folder = a.out or ("optimiser_reorder_only" if cfg.reorder_only else "optimiser_draft_all" if cfg.draft_all
+                       else "optimiser_draft" if cfg.draft_gps else "optimiser")
+    label = "Prometheus School" + (" - reorder only (no stop changes bus)" if cfg.reorder_only else
+                                   " - ceiling: every stop movable" if cfg.draft_all else "")
+    path = report.write(outputs / folder, results, cfg.to_dict(),
+                        draft=not cfg.require_verified or cfg.allow_corroborated or cfg.draft_gps or cfg.draft_all,
+                        label=label)
     print(f"\nwrote {path}")
     print(gmaps.usage_report())
     return 0

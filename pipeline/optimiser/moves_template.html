@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Network proposal</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  Written by pipeline/optimiser/report.py next to summary.md. Each bus's proposed run as
+  straight lines between its stops (not the roads), stops that change bus ringed.
+  Open with python pipeline/serve.py (the Google map key only works on localhost:8777).
+-->
+__GMAP_TAGS__
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1c2230;--mut:#677085;--line:#e2e5ea;--acc:#1d4ed8;--ok:#1a7f37;--bad:#c62828}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg);display:grid;grid-template-columns:330px 1fr;height:100vh}
+#side{overflow:auto;background:var(--card);border-right:1px solid var(--line);padding:12px}
+h1{font-size:15px;margin:0 0 4px}.mut{color:var(--mut);font-size:12px}
+.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;padding:6px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font:inherit}
+.tabs button.on{background:#e8f0fe;border-color:var(--acc);font-weight:600}
+table{border-collapse:collapse;width:100%;margin:6px 0 12px}th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:11px;color:var(--mut);font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums}
+.good{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+.move{padding:6px 8px;border:1px solid var(--line);border-radius:8px;margin:6px 0;cursor:pointer}
+.move:hover{background:#f3f6fb}.move b{font-size:12.5px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+#map{width:100%;height:100%}
+.draft{background:#fff4e5;border:1px solid #f0c36d;padding:6px 8px;border-radius:6px;margin:8px 0;font-size:12px}
+@media (max-width:800px){body{grid-template-columns:1fr;grid-template-rows:45vh 1fr}#side{order:2}}
+</style></head>
+<body>
+<div id="side"></div>
+<div id="map"></div>
+<script>
+"use strict";
+const P = __DATA__;
+const PAL = ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac",
+             "#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf",
+             "#393b79","#637939","#8c6d31","#843c39","#7b4173"];
+const hm = m => m == null ? "" : `${String(Math.floor(Math.round(m) / 60)).padStart(2, "0")}:${String(Math.round(m) % 60).padStart(2, "0")}`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let map = L.map("map"), layer = L.layerGroup().addTo(map), dir = Object.keys(P.directions)[0];
+const colour = {};
+[...new Set(Object.values(P.directions).flatMap(d => d.routes_current.concat(d.routes_optimised).map(r => r.vehicle)))]
+  .sort().forEach((v, i) => colour[v] = PAL[i % PAL.length]);
+
+function show(d) {
+  dir = d;
+  const D = P.directions[d], sc = D.summary_current, so = D.summary_optimised;
+  layer.remove(); layer = L.layerGroup().addTo(map);
+  const fit = [], moves = [];
+  D.routes_optimised.forEach(r => {
+    const pts = r.stops.map(s => [s.lat, s.lon]);
+    const line = d === "am" ? pts.concat([P.school]) : [P.school].concat(pts);
+    L.polyline(line, { color: colour[r.vehicle], weight: 3, opacity: .75 }).bindTooltip(`${r.vehicle}: ${r.duration_min} min, ${r.children} riders`).addTo(layer);
+    r.stops.forEach(s => {
+      fit.push([s.lat, s.lon]);
+      const moved = s.was_on !== r.vehicle;
+      if (moved) moves.push({ s, to: r.vehicle });
+      L.circleMarker([s.lat, s.lon], { radius: moved ? 9 : 4, color: moved ? "#111" : colour[r.vehicle], weight: moved ? 3 : 1,
+        fillColor: colour[r.vehicle], fillOpacity: .95 })
+        .bindTooltip(`<b>${esc(s.name)}</b><br>${s.children} rider(s) · ${hm(s.eta_min)}` +
+          (moved ? `<br><b>moves from ${s.was_on} to ${r.vehicle}</b>` : `<br>stays on ${r.vehicle}`) +
+          (s.verified ? "" : "<br><i>locked: no confirmed pin yet</i>")).addTo(layer);
+    });
+  });
+  L.circleMarker(P.school, { radius: 8, color: "#111", weight: 2, fillColor: "#fff", fillOpacity: 1 }).bindTooltip("School (bus gate)").addTo(layer);
+  if (fit.length) map.fitBounds(fit.concat([P.school]), { padding: [30, 30] });
+  const delta = (k, unit, lowGood = true) => {      // lowGood null: a cost to note, not a score
+    const x = Math.round((so[k] - sc[k]) * 10) / 10, cls = x === 0 || lowGood === null ? "" : ((x < 0) === lowGood ? "good" : "bad");
+    return `<td class="n">${sc[k]}${unit}</td><td class="n">${so[k]}${unit}</td><td class="n ${cls}">${x > 0 ? "+" : ""}${x}${unit}</td>`;
+  };
+  const byPair = {};
+  moves.forEach(m => { const k = `${m.s.was_on} → ${m.to}`; (byPair[k] = byPair[k] || []).push(m); });
+  let h = `<h1>Network proposal</h1><div class="mut">${esc(P.input)} · generated ${esc(P.generated.slice(0, 16).replace("T", " "))}</div>`;
+  if (P.draft) h += `<div class="draft"><b>DRAFT.</b> Some moved stops do not have a confirmed position and name yet. Confirm them before acting on this.</div>`;
+  h += `<div class="tabs">${Object.keys(P.directions).map(k => `<button class="${k === d ? "on" : ""}" onclick="show('${k}')">${k === "am" ? "Morning" : "Afternoon"}</button>`).join("")}</div>`;
+  h += `<table><tr><th></th><th>today</th><th>proposed</th><th>change</th></tr>
+    <tr><td>Buses</td>${delta("buses_used", "")}</tr><tr><td>Bus-minutes</td>${delta("bus_minutes", "")}</tr>
+    <tr><td>Bus-km</td>${delta("bus_km", "")}</tr><tr><td>Mean ride (min)</td>${delta("student_ride_min_mean", "")}</tr>
+    <tr><td>Longest ride (min)</td>${delta("student_ride_min_max", "")}</tr>
+    <tr><td>Riders moved to another bus</td>${delta("children_reassigned", "", null)}</tr></table>`;
+  h += `<div class="mut">${D.notes.map(esc).join("<br>")}</div>`;
+  h += `<h1 style="margin-top:12px">${moves.length} stops change bus</h1>`;
+  Object.entries(byPair).sort((a, b) => b[1].length - a[1].length).forEach(([k, ms]) => {
+    const kids = ms.reduce((a, m) => a + m.s.children, 0);
+    h += `<div class="move" onclick="zoomTo(${JSON.stringify(ms.map(m => [m.s.lat, m.s.lon]))})"><b>${esc(k)}</b> · ${kids} rider(s)<br>` +
+      ms.map(m => `<span class="sw" style="background:${colour[m.to]}"></span>${esc(m.s.name)} <span class="mut">${hm(m.s.eta_min)}</span>`).join("<br>") + `</div>`;
+  });
+  const gone = D.routes_current.map(r => r.vehicle).filter(v => !D.routes_optimised.some(r => r.vehicle === v));
+  if (gone.length) h += `<p><b>Not needed in this proposal:</b> ${gone.join(", ")}</p>`;
+  h += `<p class="mut">Lines join each bus's stops in order (straight lines, not the roads). Ringed stops change bus. Locked stops (no confirmed pin yet) stay on today's bus.</p>`;
+  document.getElementById("side").innerHTML = h;
+}
+function zoomTo(pts) { if (pts.length === 1) pts = pts.concat([[pts[0][0] + .003, pts[0][1] + .003]]); map.fitBounds(pts, { padding: [80, 80], maxZoom: 16 }); }
+show(dir);
+if (window.google && google.maps && map.g) google.maps.event.addListenerOnce(map.g, "idle", () => show(dir));
+</script>
+</body></html>

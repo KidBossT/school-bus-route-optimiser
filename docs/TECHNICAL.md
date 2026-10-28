@@ -295,6 +295,51 @@ in `cache/gps_runs.json`. `--apply-pins` writes every measured stop into
 touched). The next build re-prices those legs on Google and refits the
 calibration; the build log prints the error against each GPS run.
 
+### The GPS campaign (`pipeline/gps_campaign.py`)
+
+`gps_runs.py` trusts one file and its taps. The campaign (21–23 and 27 Oct 2026: 296
+files from the didis' phones, 141 usable runs on 23 routes) showed that does not hold at
+scale, so the campaign script reads a whole folder and trusts nothing on its own:
+
+```bash
+python pipeline/gps_campaign.py "GPS Bus Data" --no-seniors 2026-10-21,2026-10-22,2026-10-23 --apply-pins
+python pipeline/build_routes.py
+python pipeline/serve.py           # then http://localhost:8777/gps_check.html
+```
+
+- **Runs are rebuilt by clock time** (04:30–10:30 morning, 12:00–20:30 afternoon) from
+  every file of a route and day: 17 runs were saved under the wrong session, 7 files were
+  a test run resumed days later, 16 runs were split over several files. A run that never
+  leaves school is a test (all 17 Oct files) or a parked bus.
+- **A stop is where the bus stood**, from the track (smoothed speed under 1 m/s for 8 s or
+  more), not where a button was pressed. Taps only mark which standing spells the didi
+  thought were stops; presses made while moving count once a minute (one run had 102 taps,
+  18 runs had 0–2).
+- **Places recur across days**: standing spells within 40 m on different runs are one place.
+  Each place is named from the roster by an order-keeping match (printed order, each run's
+  clock offset found by search, so 22 Oct's early dismissal lines up), distance to the
+  planner's pin (scored by pin quality), the Aug card-tap times, who rides there (a stop
+  with only Grade 9–12 riders should be empty on `--no-seniors` days; only a nudge, as
+  seniors may have come in for exams) and, with `--places`, a Google Places search for the
+  stop's name in a 250 m circle around the GPS position (confirms only on the stop's own
+  words, never an area word like "Model Town"; answers cached in `cache/gps_namecheck.json`).
+  A P/D stop is one place with the stop named after its pickup (morning) or drop (afternoon).
+- **Two confidences per stop**: location (bus stood there on 2+ runs) and name (pin within
+  150 m / Google confirms, and time within the timetable's slack). `--apply-pins` writes
+  only stops where both are confirmed, noted "GPS campaign ...", and removes its own earlier
+  pins that a later run no longer confirms; a pin placed by hand is never touched.
+- **The comparison pins are frozen** in `cache/gps_campaign_basepins.json` (the planner's
+  pins before any campaign pin), so a re-run after applying pins and rebuilding does not
+  measure GPS against itself.
+- **Times**: `outputs/gps_timetable.csv` keeps a printed time unless the bus was 3+ min off
+  it on 2+ runs at a confirmed stop (morning rounded down, afternoon normalised to an
+  ordinary dismissal). The campaign's runs also feed the calibration
+  (`gps_campaign.as_gps_runs`): 569 morning and 373 afternoon GPS legs.
+
+Outputs: `cache/gps_campaign.json` (everything), `outputs/gps_check.html` (map and table per
+route: tracks, GPS stops coloured by name confidence, old pins), `outputs/gps_stops.csv`
+(one row per roster stop with a Google Maps link and what to check).
+
 ### The planner page (`outputs/routes.html`)
 
 - **Routes**: per route and run, *Old route* / *New route* / **Compare**. Compare
@@ -537,7 +582,7 @@ itself the useful reading, and is how it is labelled.
 
 ---
 
-## Route optimiser (foundation, not yet run on real coordinates)
+## Route optimiser (network: which bus serves which stop)
 
 `pipeline/optimiser/` redesigns the **whole network**, not one route at a time: it
 decides which bus serves which stop and in what order, for the morning and the
@@ -545,8 +590,9 @@ afternoon separately, and compares the result against today's plan using the
 same scorer and the same travel-time matrix. `build_routes.py` still does the
 narrower job of re-ordering stops within each existing route.
 
-It is built and tested. It has **not produced a usable plan yet**, because no
-stop coordinate is verified. By default it will only route verified stops.
+It is built and tested. Only verified stops move between buses; since the GPS
+campaign (Oct 2026) about half the stops are verified, and the rest are routed
+but kept on today's bus (see "Since the GPS campaign" below).
 
 ### Workflow once coordinates are collected
 
@@ -612,6 +658,47 @@ ASSUMPTIONS.** They are not in any source file.
 - **Held stops**: a stop with no usable coordinate stays on today's bus with its
   seats reserved. The time it adds to a run is *not* counted; the report says so.
 
+### Since the GPS campaign (Oct 2026)
+
+- **Locked, not held** (`lock_unverified`, on): a stop without a verified point is
+  still routed so its time counts, but it stays on today's bus (`locked_vehicle`).
+  It is timed where the bus really goes: the place the GPS campaign measured the bus
+  standing there (`gps_campaign`); failing that, if its pin is more than 300 m off the
+  bus's GPS track, the point where the bus is at the stop's printed time; else the
+  pin. On the old pins alone, some buses' runs came out 2-4x their GPS length (R4 AM
+  184 vs 48 min) and "fixing" those phantom detours looked like savings. Only verified
+  stops (the campaign's confirmed pins) move between buses. `--draft-gps` also lets
+  stops whose GPS place is sure but whose name is unconfirmed move, stamped DRAFT,
+  into `outputs/optimiser_draft/`.
+- **Closed buses** (`closed_vehicles`): keep exactly today's stops (nobody moves on or
+  off). R06 and R23 are closed: no GPS to check their runs, and R23 may have stopped
+  running in August.
+- **Today's order is the driven order**: each stop's place on the bus's GPS track
+  (that run's clock lined up with the printed one), else its printed time.
+- **Measured dwell**: 0.75 + 0.08 min per rider (fitted on 429 GPS stops: 0.77 +
+  0.077); the old 0.25 min per rider put an 8-rider stop at 2.75 min against ~1.4.
+- **Estimated pairs by distance band** (`matrix.py`): pairs Google was not asked for
+  are scaled per straight-line band (<1, 1-2, 2-4, 4-8, >8 km) on the real pairs, not
+  one factor; one factor fitted the short neighbour hops and left a 16 km leg at
+  twice its real time.
+- With all of this the model's today matches the GPS runs to a median of +6 min
+  (mean |error| 9 min) in the morning and +7 min (12) in the afternoon.
+- **Staff ride** (`include_staff`, on): teachers and staff (numeric IDs in the student
+  list, 138 of them) take seats and their stops are served. The dashboard still
+  counts students only (`transport_spine.parse_roster`'s default).
+- **Traffic put back** (`matrix_provider: "google_static"`, `traffic_scale: "auto"`):
+  the no-traffic Essentials matrix (10,000 free elements a month) is scaled by
+  Google's traffic-aware/no-traffic ratio, measured on the pairs the route planner
+  already priced with traffic. The calibration factors were fitted on traffic-aware
+  times; GPS-measured points (verified or GPS place) get the GPS factor.
+- **Never worse than today** (`never_worse_than_today`, on): a bus whose run is
+  already longer than `max_ride_min` (R3 and R22 afternoons need 100+ min of road)
+  may keep today's length but not exceed it, so today's plan is not scored as a
+  breach that no plan could fix.
+- **The school is the bus gate**: a GPS override (median of 93 run ends) 232 m
+  from the geocoded school point.
+- `stop_moves.csv`: one row per stop the proposal moves to another bus.
+
 ### Outputs (`outputs/optimiser/`)
 
 `summary.md` (today vs optimised, per bus), `plan.json` (every stop and ETA),
@@ -620,10 +707,11 @@ ASSUMPTIONS.** They are not in any source file.
 within the ride limit even when serving nothing else. Those are usually wrong
 pins.
 
+`map.html` shows the proposal on a Google map (each bus's run as straight lines between
+its stops, stops that change bus ringed); open it with `python pipeline/serve.py`.
+
 ### Not done yet
 
-- A map view of the proposal. `plan.json` carries the coordinates, so
-  `routes_template.html` could render it.
 - Pickup-time windows per stop ("not before 06:30 at X").
 - Retiring a specific bus. Today only spare buses can be *added* (`extra_vehicles`).
 - Bus depot / garage legs. Runs are open paths that start at the first stop.

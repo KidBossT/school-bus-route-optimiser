@@ -25,19 +25,24 @@ class Evaluator:
         self.cap = [v.capacity - v.reserved_load for v in problem.vehicles]
         self.vid = [v.id for v in problem.vehicles]
         self.existing = [v.existing for v in problem.vehicles]
+        self.closed = [v.closed for v in problem.vehicles]
         self.home = [None] + [nd.current_vehicle for nd in problem.nodes]
         self.lock = [None] + [nd.locked_vehicle for nd in problem.nodes]
 
     # ------------------------------------------------------------------
-    def max_duration(self, seq: list[int]) -> float:
-        """Longest this run may take, from the tightest of the time rules."""
+    def max_duration(self, seq: list[int], v: int | None = None) -> float:
+        """Longest this run may take, from the tightest of the time rules; a bus whose run
+        is longer today may keep today's length (never_worse_than_today)."""
         c = self.cfg
         if self.p.direction == "am":
             dl = min((self.deadline[j] for j in seq), default=np.inf)
             window = dl - c.earliest_pickup_min if np.isfinite(dl) else np.inf
         else:
             window = c.latest_drop_min - c.dismissal_min - c.school_dwell_min
-        return min(c.max_ride_min, window)
+        limit = min(c.max_ride_min, window)
+        if v is not None and self.p.vehicles[v].max_run_min is not None:
+            limit = max(limit, self.p.vehicles[v].max_run_min)
+        return limit
 
     def route_cost(self, seq: list[int], v: int) -> float:
         if not seq:
@@ -56,9 +61,11 @@ class Evaluator:
                 moved += dem[j]
             if self.lock[j] is not None and self.lock[j] != vid:
                 moved += 1e6          # locked stops never leave their bus
+            elif self.closed[v] and self.home[j] != vid:
+                moved += 1e6          # ... and a closed bus takes nobody new
             prev = j
         over_cap = max(0.0, load - self.cap[v])
-        over_time = max(0.0, t - self.max_duration(seq))
+        over_time = max(0.0, t - self.max_duration(seq, v))
         return (w.bus_fixed + w.drive_min * t + w.km * km + w.student_ride_min * ride
                 + w.reassigned_student * moved + w.violation * (over_cap + over_time))
 
@@ -100,7 +107,7 @@ class Evaluator:
                 "printed_min": nd.printed_min, "ride_min": round(ride, 1),
                 "verified": nd.verified, "was_on": nd.current_vehicle,
             })
-        limit = self.max_duration(seq) if seq else None
+        limit = self.max_duration(seq, v) if seq else None
         return {
             "vehicle": self.vid[v], "stops": stops, "children": load,
             "capacity": self.cap[v] + p.vehicles[v].reserved_load,
