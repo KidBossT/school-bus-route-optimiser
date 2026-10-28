@@ -19,15 +19,15 @@ open to anyone (it holds route names only), also linked from the password page.
 
 ## Results
 
-On the 23 routes that run today (408 children, 46 morning and afternoon runs):
+On the 24 routes that run today (415 children, 48 morning and afternoon runs):
 
 | | |
 |---|---|
-| Driving saved | **191 min a day**, 8.7% less drive time; 36 of 46 runs get faster |
+| Driving saved | **213 min a day**, 8.5% less drive time; 34 of 48 runs get faster, none drives further |
 | Distance saved | **109 km a day**, about 24,000 km a school year |
 | Fuel money saved | **₹4.2–5.1 lakh a year** (all-diesel to all-CNG fleet)* |
 | CO₂ avoided | **13–16 tonnes a year***|
-| Timing model error | 14.1 → **3.6 min per stop** against the printed timetable (route-by-route cross-validation) |
+| Timing model error | 8.9 → **3.3 min per stop** in the morning, 12.3 → **6.3** in the afternoon, against the printed timetable (route-by-route cross-validation) |
 | Checked against GPS | Google's times matched a GPS-logged bus run to **within 3%** (41.3 vs 40.1 min) |
 
 \* Assumes 220 school days, CNG 4 km/kg at ₹85/kg, diesel 5 km/litre at ₹88/litre,
@@ -66,7 +66,10 @@ flowchart LR
   2-opt. Travel times come from a sparse matrix: each stop to its 7 nearest stops on
   Google's traffic model, every other pair estimated at the run's median Google pace
   per straight-line km. Each stop is priced at the time the bus reaches it, and a
-  proposal is kept only if Google's full-route timing confirms it is faster.
+  proposal is kept only if Google's full-route timing confirms it is faster and it is
+  no longer in km. It is timed with one factor for the whole run (the printed order's
+  calibrated/Google ratio), so its saving is Google's saving scaled to these buses;
+  leg-by-leg factors would let a re-paired order look faster on paper alone.
 - **Calibration.** Google prices cars, not 40-seat buses stopping every few hundred
   metres. Each leg is scaled by a factor for its distance band (under 1, 1–2, 2–4,
   4–8, over 8 km), a ratio estimator fitted 80% on the printed timetable and 20% on

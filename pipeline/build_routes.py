@@ -26,10 +26,15 @@ Calibration (calibration.py; on by default, --raw-google turns it off):
 Google's car times run about twice the printed timetable on short hops and
 close to it on long legs, so every Google leg is scaled by a factor that
 depends on the leg's length, fitted 80% on the printed timetable and 20% on
-whole-run tap times, and checked route by route before it is used. The same
-scaled times drive the order search, so the optimisation and the displayed
-times agree. The fitted model is saved to cache/calibration.json for the
-network optimiser.
+whole-run tap times, and checked route by route before it is used. The
+printed order is timed leg by leg with those factors. A proposed order is
+timed on Google's own traffic times scaled by ONE factor, the printed order's
+calibrated/Google ratio for that run: the per-leg factors differ by leg length
+and pin status, so applying them to a new order rewards re-pairing stops on
+paper (9 of 48 runs "saved" time Google said they lose). A proposal is kept
+only if Google times it faster than the printed order AND it is no longer in
+km; its saving is then Google's saving scaled to these buses. The fitted
+model is saved to cache/calibration.json for the network optimiser.
 
 Only stops with a usable coordinate can be routed. The rest are listed, not
 hidden. Coordinates come from the geocoders and are unverified; a wrong
@@ -437,27 +442,31 @@ def plan(stops: list[dict], school: tuple, morning: bool, cache, scale=None) -> 
     if USE_GOOGLE_MATRIX:
         D = google_table(pts, node_departs(stops, school, morning), morning, cache)
         if D is not None:
+            candidates.setdefault(tuple(search(D)), "google")
             if scale is not None:
                 D = D * np.array([[scale(geo.haversine_km(*a, *b), ok[i] and ok[j])
                                    for j, b in enumerate(pts)] for i, a in enumerate(pts)])
-            candidates.setdefault(tuple(search(D)), "google")
+                candidates.setdefault(tuple(search(D)), "google")
     D = table(pts, cache)
     if D is not None:
         candidates.setdefault(tuple(search(D)), "osrm")
     if not candidates:
         return None
 
-    def timed(seq, start=None):   # both plans depart at the same moment
+    def timed(seq, start=None, factor=None):   # both plans depart at the same moment
         r = run_legs(seq, school, morning, cache, start)
         if r is None:
             return None
-        wp = ([(x["lat"], x["lon"]) for x in seq] + [school]) if morning \
-            else ([school] + [(x["lat"], x["lon"]) for x in seq])
-        kms = [geo.haversine_km(*wp[i], *wp[i + 1]) for i in range(len(wp) - 1)]
-        sure = ([bool(x.get("verified")) for x in seq] + [True]) if morning \
-            else ([True] + [bool(x.get("verified")) for x in seq])
-        legs = [l * (scale(k, sure[i] and sure[i + 1]) if scale else 1.0)
-                for i, (l, k) in enumerate(zip(r["legs_min"], kms))]
+        if factor is not None:     # one factor for the whole run (proposals)
+            legs = [l * factor for l in r["legs_min"]]
+        else:                      # per-leg calibration (the printed order)
+            wp = ([(x["lat"], x["lon"]) for x in seq] + [school]) if morning \
+                else ([school] + [(x["lat"], x["lon"]) for x in seq])
+            kms = [geo.haversine_km(*wp[i], *wp[i + 1]) for i in range(len(wp) - 1)]
+            sure = ([bool(x.get("verified")) for x in seq] + [True]) if morning \
+                else ([True] + [bool(x.get("verified")) for x in seq])
+            legs = [l * (scale(k, sure[i] and sure[i + 1]) if scale else 1.0)
+                    for i, (l, k) in enumerate(zip(r["legs_min"], kms))]
         rows, t = [], None
         if morning:
             t = seq[0]["printed"] if start is None else start   # current: first printed pickup
@@ -485,17 +494,24 @@ def plan(stops: list[dict], school: tuple, morning: bool, cache, scale=None) -> 
     if cur is None:
         return None
     start = cur["stops"][0]["eta"] if morning else cur["school_time"]
+    factor = cur["drive_min"] / cur["drive_model_min"] if cur["drive_model_min"] > 0 else 1.0
+    printed = tuple(range(1, len(stops) + 1))
     opt, order_source = None, None
     for order, src in candidates.items():
-        t = timed([stops[i - 1] for i in order], start)
-        if t is not None and (opt is None or t["drive_min"] < opt["drive_min"]):
+        if order == printed:
+            continue
+        t = timed([stops[i - 1] for i in order], start, factor)
+        # Google is the judge, and the bus must not drive further.
+        if t is not None and t["drive_model_min"] < cur["drive_model_min"] \
+                and t["km"] <= cur["km"] \
+                and (opt is None or t["drive_model_min"] < opt["drive_model_min"]):
             opt, order_source = t, src
-    if opt is None:
-        return None
     note = None
-    if opt["drive_min"] > cur["drive_min"]:
-        # No candidate beats the printed order on Google's full-route timing.
-        opt, note = cur, "reordering is not faster once traffic is included; printed order kept"
+    if opt is None:
+        opt, order_source = cur, "printed"
+        if set(candidates) != {printed}:
+            note = ("no order is both faster on Google's traffic times and no longer "
+                    "than the printed one; printed order kept")
     return {"current": cur, "optimised": opt, "note": note, "order_source": order_source,
             "saved_min": round(cur["drive_min"] - opt["drive_min"], 1)}
 
