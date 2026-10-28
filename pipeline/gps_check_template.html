@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>GPS stop check</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  Written by pipeline/gps_campaign.py. One route at a time: the GPS tracks of every logged run,
+  the places the bus really stood (coloured by how sure the name is) and the planner's old pins.
+  Open with python pipeline/serve.py (the Google map key only works on localhost:8777).
+-->
+__GMAP_TAGS__
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1c2230;--mut:#677085;--line:#e2e5ea;--ok:#1a7f37;--mid:#b26b00;--bad:#c62828;--un:#6b7280;--acc:#1d4ed8}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg);display:grid;grid-template-columns:230px 1fr;height:100vh}
+#nav{overflow:auto;background:var(--card);border-right:1px solid var(--line)}
+#nav h1{font-size:14px;margin:12px 12px 4px}#nav p{margin:0 12px 10px;color:var(--mut);font-size:12px}
+#nav div{padding:7px 12px;cursor:pointer;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:6px}
+#nav div.on{background:#e8f0fe;font-weight:600}
+.badge{font-size:11px;border-radius:9px;padding:0 7px;background:#fde8e8;color:var(--bad);font-weight:600;white-space:nowrap}
+.badge.ok{background:#e6f4ea;color:var(--ok)}
+#main{display:grid;grid-template-rows:auto minmax(260px,52%) 1fr;min-width:0}
+#head{padding:8px 14px;background:var(--card);border-bottom:1px solid var(--line)}
+#head b{font-size:15px}#head .runs{color:var(--mut);font-size:12px;margin-top:2px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--mut);margin-top:4px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:4px;vertical-align:-1px;border:1px solid #333}
+#map{width:100%;height:100%}
+#tbl{overflow:auto;background:var(--card);border-top:1px solid var(--line)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{position:sticky;top:0;background:#fafbfc;font-weight:600;font-size:12px;color:var(--mut);white-space:nowrap}
+td.t{white-space:nowrap;font-variant-numeric:tabular-nums}
+tr.row:hover{background:#f3f6fb;cursor:pointer}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.c-high{color:var(--ok);font-weight:600}.c-medium{color:var(--mid);font-weight:600}.c-low{color:var(--bad);font-weight:600}
+.why{color:var(--bad);font-size:12px}.mut{color:var(--mut);font-size:12px}
+.days code{font-size:11px;letter-spacing:1px}
+@media (max-width:800px){body{grid-template-columns:1fr;grid-template-rows:auto 1fr}#nav{max-height:30vh}}
+</style></head>
+<body>
+<div id="nav"><h1>GPS stop check</h1><p>Places the bus really stood, day after day, matched to the student-list stops. Red and amber rows need a person to confirm.</p></div>
+<div id="main">
+  <div id="head"></div>
+  <div id="map"></div>
+  <div id="tbl"></div>
+</div>
+<script>
+"use strict";
+const D = __DATA__;
+const COL = { high: "#1a7f37", medium: "#e09b10", low: "#c62828", none: "#9ca3af" };
+const DAYC = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#b07aa1"];
+const hm = m => m == null ? "" : `${String(Math.floor(Math.round(m) / 60)).padStart(2, "0")}:${String(Math.round(m) % 60).padStart(2, "0")}`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const toCheck = r => r.stops.filter(s => s.name_conf === "low" || s.name_conf === "medium" || s.status.startsWith("NOT SEEN")).length + r.unnamed.length;
+let map = L.map("map"), layer = L.layerGroup().addTo(map), cur = 0;
+
+function daysCode(r, s) {
+  return r.runs.map(x => s.days_tapped.includes(x.day) ? "T" : s.days_seen.includes(x.day) ? "s" : "·").join("");
+}
+function show(k) {
+  cur = k;
+  const r = D[k];
+  document.querySelectorAll("#nav div").forEach((e, i) => e.classList.toggle("on", i === k));
+  layer.remove(); layer = L.layerGroup().addTo(map);
+  const fit = [];
+  r.tracks.forEach((t, i) => L.polyline(t.pts, { color: DAYC[i % DAYC.length], weight: 2.5, opacity: .55 }).bindTooltip(`run ${t.day}`).addTo(layer));
+  r.unnamed.forEach(u => {
+    fit.push([u.lat, u.lon]);
+    L.circleMarker([u.lat, u.lon], { radius: 7, color: "#333", weight: 1, fillColor: COL.none, fillOpacity: .9 })
+      .bindTooltip(`<b>Bus stops here, not on the list</b><br>${hm(u.t_med)} · stood on ${u.days_seen.length} run(s), tapped on ${u.days_tapped.length} · ${u.dwell_s} s`).addTo(layer);
+  });
+  r.stops.forEach((s, i) => {
+    if (s.pin_ll) L.circleMarker(s.pin_ll, { radius: 4, color: "#1d4ed8", weight: 2, fillColor: "#fff", fillOpacity: 1 })
+      .bindTooltip(`old planner pin: ${esc(s.name)}`).addTo(layer);
+    if (s.lat == null) { if (s.pin_ll) fit.push(s.pin_ll); return; }
+    fit.push([s.lat, s.lon]);
+    if (s.pin_ll) L.polyline([s.pin_ll, [s.lat, s.lon]], { color: "#1d4ed8", weight: 1, opacity: .7, dashArray: "4 4" }).addTo(layer);
+    L.circleMarker([s.lat, s.lon], { radius: 9, color: "#111", weight: 1, fillColor: COL[s.name_conf] || COL.none, fillOpacity: .92 })
+      .bindTooltip(`<b>${i + 1}. ${esc(s.name)}</b><br>GPS ${hm(s.arr_med)} (printed ${hm(s.printed)}) · ${s.days_seen.length} run(s)<br>${s.d_pin_m == null ? "no old pin" : s.d_pin_m + " m from old pin"}`).addTo(layer);
+  });
+  if (fit.length) map.fitBounds(fit, { padding: [30, 30], maxZoom: 16 });
+  const runs = r.runs.map(x => `${x.day.slice(5)} ${x.logged[0].slice(0, 5)}–${x.logged[1].slice(0, 5)}`).join(" · ");
+  document.getElementById("head").innerHTML = `<b>Route ${esc(r.key.slice(1))}</b>
+    <div class="runs">Runs logged: ${runs}</div>
+    <div class="legend"><span><i style="background:${COL.high}"></i>place and name confirmed</span><span><i style="background:${COL.medium}"></i>place sure, name to confirm</span>
+    <span><i style="background:${COL.low}"></i>check this one</span><span><i style="background:${COL.none}"></i>bus stops here, not on the list</span>
+    <span><i style="background:#fff;border-color:#1d4ed8"></i>old planner pin</span></div>`;
+  let h = `<table><tr><th>#</th><th>printed</th><th>stop on the student list</th><th>riders</th><th>GPS time</th><th>per run</th><th>stood</th><th>runs</th><th>from old pin</th><th>name</th><th>what to check</th></tr>`;
+  r.stops.forEach((s, i) => {
+    const rid = `${s.riders.junior}${s.riders.senior ? ` + ${s.riders.senior} Gr 9-12` : ""}${s.riders.staff ? ` + ${s.riders.staff} staff` : ""}`;
+    h += `<tr class="row" onclick="zoom(${i})"><td>${i + 1}</td><td class="t">${hm(s.printed)}</td><td>${esc(s.name)}</td><td class="t">${rid}</td>`;
+    if (s.lat != null) {
+      const per = s.obs.map(o => `${o.day.slice(5)} ${hm(o.arr)}`).join(", ");
+      h += `<td class="t">${hm(s.arr_med)}</td><td class="mut">${per}</td><td class="t">${s.dwell_med_s == null ? "moving" : Math.round(s.dwell_med_s) + " s"}</td>
+        <td class="days"><code>${daysCode(r, s)}</code></td><td class="t">${s.d_pin_m == null ? "–" : s.d_pin_m + " m"}</td>
+        <td class="c-${s.name_conf}"><span class="dot" style="background:${COL[s.name_conf]}"></span>${s.name_conf}</td>
+        <td class="why">${esc(s.flags.join("; "))}${s.name_note ? ` <span class="mut">${esc(s.name_note)}</span>` : ""}</td>`;
+    } else {
+      h += `<td colspan="6"></td><td class="${s.status.startsWith("NOT") ? "why" : "mut"}">${esc(s.status)}</td>`;
+    }
+    h += `</tr>`;
+  });
+  r.unnamed.forEach((u, j) => {
+    h += `<tr class="row" onclick="zoomU(${j})"><td></td><td></td><td><i>bus stops here, not on the list</i></td><td></td><td class="t">${hm(u.t_med)}</td>
+      <td class="mut">${u.obs.map(o => `${o.day.slice(5)} ${hm(o.arr)}`).join(", ")}</td><td class="t">${u.dwell_s} s</td>
+      <td class="days"><code>${r.runs.map(x => u.days_tapped.includes(x.day) ? "T" : u.days_seen.includes(x.day) ? "s" : "·").join("")}</code></td>
+      <td></td><td></td><td class="why">${u.maybe && u.maybe.length ? "maybe " + esc(u.maybe.join(" / ")) + " (its pin may be wrong)" : "which stop is this? (or a wait / traffic signal)"}</td></tr>`;
+  });
+  document.getElementById("tbl").innerHTML = h + `</table><p class="mut" style="margin:8px">runs column: T = bus stood here and the didi tapped, s = stood here without a tap, · = not seen that run (runs in date order). Click a row to zoom.</p>`;
+}
+function zoom(i) {
+  const s = D[cur].stops[i], p = [];
+  if (s.lat != null) p.push([s.lat, s.lon]);
+  if (s.pin_ll) p.push(s.pin_ll);
+  if (p.length === 1) p.push([p[0][0] + .0015, p[0][1] + .0015]);
+  if (p.length) map.fitBounds(p, { padding: [70, 70], maxZoom: 18 });
+}
+function zoomU(j) { const u = D[cur].unnamed[j]; map.fitBounds([[u.lat - .001, u.lon - .001], [u.lat + .001, u.lon + .001]], { padding: [40, 40] }); }
+document.getElementById("nav").insertAdjacentHTML("beforeend", D.map((r, i) => {
+  const n = toCheck(r);
+  return `<div onclick="show(${i})"><span>${esc(r.key)}</span><span class="badge${n ? "" : " ok"}">${n ? n + " to check" : "ok"}</span></div>`;
+}).join(""));
+show(0);
+if (window.google && google.maps && map.g) google.maps.event.addListenerOnce(map.g, "idle", () => show(cur));
+</script>
+</body></html>

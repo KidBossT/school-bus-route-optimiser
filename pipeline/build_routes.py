@@ -370,13 +370,15 @@ def calibration_runs(out, school, cache, taps) -> list:
 
 def gps_calibration_runs(school, cache, cache_dir: Path) -> list:
     """
-    One calibration.Run per run logged on the bus (gps_runs.py). Each leg is the
-    measured time from leaving one stop to reaching the next, priced by Google
-    between the measured stop positions, departing when the bus really left.
+    One calibration.Run per run logged on the bus (gps_runs.py, and every run of
+    the didis' GPS campaign, gps_campaign.py). Each leg is the measured time from
+    leaving one stop to reaching the next, priced by Google between the measured
+    stop positions, departing when the bus really left.
     """
+    import gps_campaign
     import gps_runs
     runs = []
-    for g in gps_runs.load_runs(cache_dir):
+    for g in gps_runs.load_runs(cache_dir) + gps_campaign.as_gps_runs(cache_dir):
         morning = g["session"] == "am"
         st = [s for s in g["stops"] if not s["moving_at_tap"]]
         sch = g.get("school") or {}
