@@ -38,6 +38,7 @@ class Vehicle:
     existing: bool = True         # False for a spare the solver may add
     max_run_min: float | None = None   # this bus may run this long even past the ride limit (today's run)
     closed: bool = False          # keeps exactly today's stops: no stop moves on or off it
+    retired: bool = False         # off the road in the proposal: every stop it serves today moves
 
 
 @dataclass

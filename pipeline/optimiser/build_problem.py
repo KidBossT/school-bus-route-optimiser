@@ -185,7 +185,8 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
 
     seq = {(r.route_key, r.stop_name): r.stop_seq for r in routes.itertuples()}
     places, tracks = gps_places(cache_dir, direction) if cfg.gps_campaign else ({}, {})
-    closed = set(cfg.closed_vehicles)
+    retired = set(cfg.retired_vehicles)
+    closed = set(cfg.closed_vehicles) - retired
     nodes, held, readiness = [], [], []
     for (rk, stop), g in students.dropna(subset=[rcol]).groupby([rcol, scol], sort=True):
         key, text = location_key(stop, direction)
@@ -224,6 +225,8 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
                     why = f"kept on today's bus ({why}); timed at {where}"
         if good and (rk in closed or cfg.reorder_only):
             locked = rk                        # a closed bus keeps exactly its own stops
+        if good and rk in retired:
+            locked = None                      # its bus is off the road: the stop has to move
         row = {"direction": direction, "bus_today": rk, "stop": stop, "key": key,
                "children": len(g), "lat": lat, "lon": lon,
                "source": "GPS" if (measured and not verified) else rec.get("source"),
@@ -245,7 +248,8 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
     reserved = pd.Series([h["children"] for h in held], index=[h["bus_today"] for h in held],
                          dtype=float).groupby(level=0).sum() if held else pd.Series(dtype=float)
     vehicles = [Vehicle(rk, int(cfg.capacity_by_route.get(rk, cfg.default_capacity)),
-                        reserved_load=int(reserved.get(rk, 0)), closed=rk in closed or cfg.reorder_only)
+                        reserved_load=int(reserved.get(rk, 0)), closed=rk in closed or cfg.reorder_only,
+                        retired=rk in retired)
                 for rk in fleet]
     vehicles += [Vehicle(f"SPARE{i + 1}", cfg.default_capacity, existing=False)
                  for i in range(cfg.extra_vehicles)]
@@ -307,6 +311,9 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
                      f"{len(locked_rows) - gps_n - path_n} at the planner pin)")
     if closed:
         notes.append(f"closed (keep exactly their own stops, nobody moves on or off): {', '.join(sorted(closed))}")
+    if retired:
+        notes.append(f"taken off the road in this proposal, every stop they serve today moves: "
+                     f"{', '.join(sorted(retired))}")
     if held:
         notes.append(f"{len(held)} stops ({sum(h['children'] for h in held)} children) held on "
                      f"today's bus - no usable coordinate; their seats stay reserved but the "
@@ -335,6 +342,23 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
     if am:          # driving order ends at school; outward order is the reverse
         current.routes = [r[::-1] for r in current.routes]
     return Built(problem, current, held, readiness, merges)
+
+
+def follow(built: Built, bus_of: dict[str, str]) -> int:
+    """
+    Each child keeps one bus both ways: lock every stop of this session to the bus most of its
+    riders take in the other session (already solved). Returns how many stops were fixed.
+    """
+    usable_buses = {v.id for v in built.problem.vehicles if not v.retired}
+    n = 0
+    for nd in built.problem.nodes:
+        votes = pd.Series([bus_of[s] for s in nd.students if s in bus_of], dtype=object).value_counts()
+        if len(votes) and votes.index[0] in usable_buses:
+            nd.locked_vehicle = votes.index[0]
+            n += 1
+    built.problem.notes.append(f"each child keeps one bus both ways: {n} of {built.problem.n} stops fixed to "
+                               f"the bus their riders take in the other session")
+    return n
 
 
 def _split_oversized(nodes: list[Node], cap: int) -> list[Node]:

@@ -35,6 +35,7 @@ class OptimiserConfig:
     extra_vehicles: int = 0               # spare buses the solver may add
     closed_vehicles: list = field(default_factory=list)   # buses that keep exactly today's stops, e.g. no GPS
                                                           # to check their runs, or not known to be running
+    retired_vehicles: list = field(default_factory=list)  # buses taken off the road: all their stops move
     # --- time rules -------------------------------------------------------
     max_ride_min: float = 75.0            # ASSUMPTION: longest a child may ride ...
     never_worse_than_today: bool = True   # ... except on a bus whose run is longer today: it may keep

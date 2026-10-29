@@ -698,6 +698,15 @@ ASSUMPTIONS.** They are not in any source file.
 - **The school is the bus gate**: a GPS override (median of 93 run ends) 232 m
   from the geocoded school point.
 - `stop_moves.csv`: one row per stop the proposal moves to another bus.
+- **Scenarios**: `--reorder-only` (nobody changes bus: the within-route gain), `--draft-all`
+  (every stop movable: the ceiling), and `--retire R17,R18` (those buses off the road in both
+  sessions, so the same physical fleet runs morning and afternoon; their stops must move).
+  The summary also counts riders who would be on a different bus morning and afternoon,
+  since the two sessions are optimised separately; `--same-bus` fixes that by planning the
+  afternoon first (it needs more buses) and then fixing every morning stop to the bus most of
+  its riders take in the afternoon, so each child keeps one bus both ways (`--lead am` plans
+  the morning first instead). With a fixed fleet, set `bus_fixed` to 0 so the solver may use
+  every remaining bus: an idle bus saves nothing once the fleet is decided.
 
 ### Outputs (`outputs/optimiser/`)
 
@@ -713,7 +722,7 @@ its stops, stops that change bus ringed); open it with `python pipeline/serve.py
 ### Not done yet
 
 - Pickup-time windows per stop ("not before 06:30 at X").
-- Retiring a specific bus. Today only spare buses can be *added* (`extra_vehicles`).
+- Optimising both sessions together. `--same-bus` is sequential (afternoon, then morning fitted to it).
 - Bus depot / garage legs. Runs are open paths that start at the first stop.
 - Calibrating `time_multiplier_*` from the afternoon drop-tap legs once
   coordinates are right. The dashboard already computes the ratio.

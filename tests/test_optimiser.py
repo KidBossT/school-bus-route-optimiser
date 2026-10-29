@@ -225,6 +225,27 @@ class CampaignInputTests(unittest.TestCase):
         ev = Evaluator(p, cfg_plain())
         self.assertGreater(ev.route_cost([1, 3], 1) - ev.route_cost([3], 1), 1e5)   # stop 1 lives on B0
 
+    def test_a_retired_bus_ends_up_empty(self):
+        p = line_problem("pm", caps=(40, 40), demands=(1, 1, 1))
+        p.vehicles[1].retired = True
+        ev = Evaluator(p, cfg_plain())
+        s = Solver(p, ev, k=3)
+        best, _ = s.solve([("today", Solution([[1], [2, 3]]))], 0.5, log=lambda *_: None)
+        self.assertEqual(best.routes[1], [])                     # everything moved off the retired bus
+        ev.enforce_retired = False                                # reporting today's plan on normal terms
+        self.assertLess(ev.route_cost([2, 3], 1), 1e5)
+
+    def test_each_stop_follows_its_riders_other_bus(self):
+        from optimiser import build_problem
+        p = line_problem("am", caps=(40, 40), demands=(2, 1, 1))
+        p.vehicles[0].retired = True
+        b = build_problem.Built(p, Solution([[1, 2, 3], []]))
+        bus_of = {"k10": "B1", "k11": "B1", "k20": "B0"}     # stop 2's rider rides a retired bus: left free
+        self.assertEqual(build_problem.follow(b, bus_of), 1)
+        self.assertEqual([nd.locked_vehicle for nd in p.nodes], ["B1", None, None])
+        s = Solver(p, Evaluator(p, cfg_plain()), k=3)
+        self.assertIn(1, s.from_locks().routes[1])                 # built straight onto its fixed bus
+
     def test_moves_list_only_stops_that_change_bus(self):
         from optimiser import report
         cur = [{"vehicle": "R01", "duration_min": 30.0,

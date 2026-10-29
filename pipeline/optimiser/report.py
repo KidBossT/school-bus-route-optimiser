@@ -162,6 +162,15 @@ def write(out_dir: Path, results: dict, cfg_dict: dict, draft: bool, label: str)
         gone = sorted(set(today_run) - {x["vehicle"] for x in opt})
         if gone:
             md.append(f"\nNot needed in the proposal: {', '.join(gone)}")
+    if {"am", "pm"} <= set(results):
+        both = {}
+        for c in changes:
+            both.setdefault(c["admission_no"], {})[c["direction"]] = (c["bus_today"], c["bus_proposed"])
+        two = [b for b in both.values() if len(b) == 2]
+        split_today = sum(1 for b in two if b["am"][0] != b["pm"][0])
+        split_new = sum(1 for b in two if b["am"][1] != b["pm"][1])
+        md += ["", f"Riders on a different bus in the morning and the afternoon: today {split_today}, "
+                   f"proposed {split_new} (of {len(two)} who ride both ways)."]
     md += ["", "## Files", "",
            "- `plan.json` - every route, stop, ETA and metric, today vs optimised",
            "- `student_changes.csv` - per child: bus today, bus proposed, time shift",

@@ -26,6 +26,10 @@ class Evaluator:
         self.vid = [v.id for v in problem.vehicles]
         self.existing = [v.existing for v in problem.vehicles]
         self.closed = [v.closed for v in problem.vehicles]
+        self.retired = [v.retired for v in problem.vehicles]
+        # on while searching; off once a plan is chosen, so today's plan (which still uses
+        # those buses) is reported on the same terms as before
+        self.enforce_retired = True
         self.home = [None] + [nd.current_vehicle for nd in problem.nodes]
         self.lock = [None] + [nd.locked_vehicle for nd in problem.nodes]
 
@@ -63,6 +67,8 @@ class Evaluator:
                 moved += 1e6          # locked stops never leave their bus
             elif self.closed[v] and self.home[j] != vid:
                 moved += 1e6          # ... and a closed bus takes nobody new
+            if self.enforce_retired and self.retired[v]:
+                moved += 1e6          # a retired bus carries nobody
             prev = j
         over_cap = max(0.0, load - self.cap[v])
         over_time = max(0.0, t - self.max_duration(seq, v))

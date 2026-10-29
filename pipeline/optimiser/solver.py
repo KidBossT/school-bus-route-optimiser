@@ -108,6 +108,12 @@ class Solver:
         self._insert_all(sol, spill)
         return sol
 
+    def from_locks(self) -> Solution:
+        """Every stop inserted at its cheapest place; a locked stop can only land on its bus."""
+        sol = Solution([[] for _ in self.p.vehicles])
+        self._insert_all(sol, list(range(1, self.p.n + 1)))
+        return sol
+
     # ------------------------------------------------------------------
     # insertion
     # ------------------------------------------------------------------

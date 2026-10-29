@@ -40,7 +40,10 @@ def optimise(built, cfg, time_limit, log=print) -> dict:
     ev = Evaluator(built.problem, cfg)
     solver = Solver(built.problem, ev, k=cfg.neighbours, seed=cfg.seed)
     starts = [("today", built.current), ("savings", solver.savings())]
+    if any(nd.locked_vehicle and nd.locked_vehicle != nd.current_vehicle for nd in built.problem.nodes):
+        starts.append(("locks", solver.from_locks()))      # stops fixed to another bus: build from those
     best, history = solver.solve(starts, time_limit_s=time_limit, log=log)
+    ev.enforce_retired = False
     return {"built": built, "ev": ev, "best": best, "history": history}
 
 
@@ -64,6 +67,11 @@ def main(argv=None) -> int:
     ap.add_argument("--reorder-only", action="store_true",
                     help="baseline: no stop changes bus, only the order within each bus")
     ap.add_argument("--out", help="output folder under outputs/ (default by mode)")
+    ap.add_argument("--retire", help="buses taken off the road, e.g. R17,R18: every stop they serve moves")
+    ap.add_argument("--same-bus", action="store_true",
+                    help="each child keeps one bus both ways: plan one session, then fit the other to it")
+    ap.add_argument("--lead", choices=["am", "pm"], default="pm",
+                    help="with --same-bus, the session planned first (default pm: it needs more buses)")
     ap.add_argument("--export-coord-template", action="store_true")
     ap.add_argument("--import-coords", metavar="FILE")
     a = ap.parse_args(argv)
@@ -77,6 +85,8 @@ def main(argv=None) -> int:
         cfg.draft_all = True
     if a.reorder_only:
         cfg.reorder_only = True
+    if a.retire:
+        cfg.retired_vehicles = [x.strip().upper() for x in a.retire.split(",") if x.strip()]
     limit = a.time_limit if a.time_limit is not None else cfg.time_limit_s
     inputs, outputs, cache = Path(a.inputs), Path(a.outputs), Path(a.cache)
     directions = ["am", "pm"] if a.direction == "both" else [a.direction]
@@ -109,13 +119,17 @@ def main(argv=None) -> int:
               f"then run --import-coords on it.")
         return 0
 
-    results = {}
+    results, bus_of = {}, {}
+    if a.same_bus:
+        directions = sorted(directions, key=lambda d: d != a.lead)  # the leading session is planned first
     for d in directions:
         try:
             built = build_problem.build(d, routes, students, gc, cfg, cache, a.offline)
         except RuntimeError as exc:
             print(f"cannot optimise: {exc}")
             return 2
+        if a.same_bus and bus_of:
+            print(f"{d.upper()}  {build_problem.follow(built, bus_of)} stops fixed to their riders' other bus")
         n, h = built.problem.n, len(built.held)
         print(f"{d.upper()}  {n} stops routable, {h} held")
         if n < 2:
@@ -123,12 +137,21 @@ def main(argv=None) -> int:
                   f"--export-coord-template, fill it in, and --import-coords it.")
             continue
         results[d] = optimise(built, cfg, limit)
+        if a.same_bus:
+            p_ = built.problem
+            bus_of = {s: p_.vehicles[v].id for v, r in enumerate(results[d]["best"].routes)
+                      for j in r for s in p_.nodes[j - 1].students}
+    results = {d: results[d] for d in ("am", "pm") if d in results}
     if not results:
         return 2
     folder = a.out or ("optimiser_reorder_only" if cfg.reorder_only else "optimiser_draft_all" if cfg.draft_all
                        else "optimiser_draft" if cfg.draft_gps else "optimiser")
     label = "Prometheus School" + (" - reorder only (no stop changes bus)" if cfg.reorder_only else
                                    " - ceiling: every stop movable" if cfg.draft_all else "")
+    if cfg.retired_vehicles:
+        label += f" - without {', '.join(cfg.retired_vehicles)}"
+    if a.same_bus:
+        label += " - one bus per child both ways"
     path = report.write(outputs / folder, results, cfg.to_dict(),
                         draft=not cfg.require_verified or cfg.allow_corroborated or cfg.draft_gps or cfg.draft_all,
                         label=label)
