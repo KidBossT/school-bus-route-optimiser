@@ -8,7 +8,7 @@ The two handover PDFs for the chairman and the transport office.
 
 Both are drawn as print-styled HTML and printed by headless Chrome. Inputs are the same as
 build_handover.py (planner data, GPS timetable) plus outputs/gps_stops.csv and the optimiser
-runs outputs/optimiser_final_25 (Phase 3) and outputs/optimiser_final_23 (2-bus option).
+runs outputs/optimiser_final_25 (moving stops between buses) and outputs/optimiser_final_23 (2-bus option).
 """
 from __future__ import annotations
 
@@ -172,21 +172,21 @@ def pdf1(routes: dict, tt: pd.DataFrame) -> str:
         ("Timetable corrected", f"{len(ch)} stop times on {ch.groupby(['route', 'sess']).ngroups} of 45 runs: "
                                 f"{len(am_ch)} morning (at most {int((am_ch['final'] - am_ch['pr']).abs().max())} min), "
                                 f"{len(pm_ch)} afternoon"),
-        ("Bus changes (Phase 3)", f"{(moves['direction'] == 'am').sum()} stops in the morning and "
-                                  f"{(moves['direction'] == 'pm').sum()} in the afternoon move bus "
-                                  f"({o25[('am', 'moved')]} and {o25[('pm', 'moved')]} riders); Route 11 mornings go from 44 to 38 riders"),
+        ("Moving stops between buses", f"Studied, not proposed now: {(moves['direction'] == 'am').sum()} morning and "
+                                       f"{(moves['direction'] == 'pm').sum()} afternoon stops could move bus "
+                                       f"({o25[('am', 'moved')]} and {o25[('pm', 'moved')]} riders), mainly to take load off "
+                                       f"Route 11 (section 4)"),
         ("Fleet", f"Stays at 25 buses. Taking Routes 17 and 18 off works in the mornings but puts "
                   f"{o23[('pm', 'over')]} afternoon runs over the time limit, so it is not proposed"),
         ("Cost", "None: no new bus, driver or spending"),
     ])
 
-    b += "<h2>2. Plan and dates</h2>"
-    b += table(["Phase", "What changes", "When", "Needs"], [
+    b += "<h2>2. Plan</h2>"
+    b += table(["Phase", "What changes", "Needs"], [
         ["1. Corrected timetable", "Every route: same stops, order and bus; only the times change (section 5, column Corrected)",
-         "Mon 30 Nov", "Go-ahead; parent notice by Mon 23 Nov"],
-        ["2. New stop order", "Same stops and bus, new order (section 5, column New order). Pilot on Routes 9, 14 (afternoon) and 21 first",
-         "Pilot 30 Nov to 4 Dec, review Wed 9 Dec, other routes from January", "Go-ahead; didis log GPS in the pilot week"],
-        ["3. Bus changes", "Stops in section 4 move bus", "After the pilot review", "Seat count on Route 11; decision"],
+         "Go-ahead; parent notice before it starts"],
+        ["2. New stop order", "Same stops and bus, new order (section 5, column New order). Pilot on Routes 9, 14 (afternoon) "
+         "and 21 first, then the other routes", "Go-ahead; didis log GPS during the pilot"],
     ])
     b += "<h2>3. How to read the route pages</h2><ul>"
     b += ("<li><b>Today #</b>: position in today's order. <b>New #</b>: position in the new order. Green rows move.</li>"
@@ -207,9 +207,10 @@ def pdf1(routes: dict, tt: pd.DataFrame) -> str:
     names = roster.drop_duplicates("admission_no").set_index("admission_no")[["student_name", "grade"]]
     kids = pd.read_csv(MOVES / "student_changes.csv", encoding="utf-8-sig")
     kids = kids[kids["moved"].astype(str).str.lower() == "true"]
-    b += "<h2 style='break-before:page'>4. Phase 3: stops that change bus (decision after the pilot)</h2>"
-    b += ("<p>Each child stays on one bus both ways. Drop the JP Wishtown move to Route 12: it makes Route 12's afternoon "
-          "5 min longer than today. Needs a seat count on Route 11 first.</p>")
+    b += "<h2 style='break-before:page'>4. Stops that could change bus (studied, not proposed now)</h2>"
+    b += ("<p>For reference only: the result of letting the optimiser move stops between buses. Each child stays on one "
+          "bus both ways. The JP Wishtown move to Route 12 would make Route 12's afternoon 5 min longer than today, so it "
+          "would be dropped. Any of this needs a seat count on Route 11 first.</p>")
     b += table(["Session", "Stop", "Riders", "Bus today", "New bus", "Time today", "New time"],
                [[m.direction.upper(), m.stop, int(m.riders), f"Route {int(m.bus_today[1:])}",
                  f"Route {int(m.bus_proposed[1:])}", m.time_today, m.time_proposed]
@@ -313,10 +314,10 @@ def pdf2(routes: dict, tt: pd.DataFrame) -> str:
         "<b>Phase 2 times.</b> The planner's clock can run longer or shorter than a bus really does, so each new order is stretched "
         "to the real pace of today's run (GPS), mornings anchored to today's school arrival (never later than 5 min before reporting), "
         "afternoons to today's departure. A run that would save under 3 min keeps today's order.",
-        "<b>Phase 3, network optimiser.</b> A second program may move stops between buses as well as reorder them, under these rules: "
+        "<b>Moving stops between buses (studied).</b> A second program may move stops between buses as well as reorder them, under these rules: "
         "real seats (planned to 85%), longest ride 75 min, no pickup before 6:00, last drop by 4:45, every morning bus at school 5 min "
         "early, no run longer than today, each child on one bus both ways, and only GPS-confirmed stops may move.",
-        "<b>Pilot first.</b> Routes 9, 14 and 21 (most GPS-confirmed stops) drive the new order for one week with GPS logging; the "
+        "<b>Pilot first.</b> Routes 9, 14 and 21 (most GPS-confirmed stops) drive the new order first with GPS logging; the "
         "times are corrected from that before any other route changes.",
     ]:
         b += f"<li>{x}</li>"
@@ -324,7 +325,7 @@ def pdf2(routes: dict, tt: pd.DataFrame) -> str:
 
     b += "<h2>3. Within routes or between routes?</h2>"
     b += ("<p><b>The 205 min a day is within routes only</b>: every child keeps their bus and stop, only the order of stops on each "
-          "bus changes.</p><p><b>Swapping stops between routes was done too</b> (Phase 3, step 8), but it is not in the main proposal yet:</p><ul>"
+          "bus changes.</p><p><b>Swapping stops between routes was done too</b> (step 8), but it is not in the main proposal yet:</p><ul>"
           "<li><b>It adds little time.</b> On the same model, moving stops between buses saved only about 26 more bus-minutes in the "
           "morning and 1 in the afternoon on top of reordering (first run, 28 Oct: 99 vs 73 and 186 vs 185). Most of the gain is in the order.</li>"
           "<li><b>Only confirmed stops can move.</b> 130 morning stops (278 riders) have no GPS-confirmed position, so they stay on "
@@ -338,7 +339,7 @@ def pdf2(routes: dict, tt: pd.DataFrame) -> str:
     b += "<h2>4. Limits</h2><ul>"
     for x in [
         "GPS covers 4 school days in October (afternoons 3, one of them an early dismissal). Winter fog and exam days will change times; "
-        "a second GPS week in January rechecks every route.",
+        "another GPS week later rechecks every route.",
         f"{len(unsure_stops())} listed stops were never timed by the GPS with the bus standing still; they keep their "
         "place and printed time (outcome document, section 6). Not needed for this rollout.",
         "Route 6 sent no GPS data, so its times stay as printed. Route 23 is not running.",
@@ -353,7 +354,7 @@ def pdf2(routes: dict, tt: pd.DataFrame) -> str:
         ["Check the Google key", "python pipeline/gmaps.py --check"],
         ["New GPS files in", "python pipeline/gps_campaign.py (see docs/TECHNICAL.md)"],
         ["Rebuild the planner (routes, times, new order)", "python pipeline/build_routes.py"],
-        ["Bus changes (Phase 3)", "python pipeline/run_optimiser.py --same-bus --lead am --out optimiser_final_25"],
+        ["Moving stops between buses", "python pipeline/run_optimiser.py --same-bus --lead am --out optimiser_final_25"],
         ["Route sheets (Excel)", "python pipeline/build_handover.py --pilot 9,14,21 --moves optimiser_final_25"],
         ["These two PDFs", "python pipeline/build_pdfs.py"],
         ["Update the password-locked website", "python pipeline/build_site.py, then commit and push"],

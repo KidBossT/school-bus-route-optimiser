@@ -9,7 +9,7 @@ Reads outputs/routes_data.json (the planner), outputs/gps_timetable.csv (the GPS
 campaign's time proposals) and, with --moves, an optimiser run's stop_moves.csv /
 student_changes.csv. Writes outputs/handover/Route sheets.xlsx.
 
-With --names the Phase 3 sheet lists children by name: that copy is for the
+With --names the bus-changes sheet lists children by name: that copy is for the
 transport office only. Both live under outputs/ (git-ignored) and are never published.
 
 Times:
@@ -243,9 +243,9 @@ def new_order(r: dict, s: str, sub: pd.DataFrame) -> dict | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pilot", default="", help="pilot route numbers, e.g. 9,14,21")
-    ap.add_argument("--moves", default="", help="optimiser output folder under outputs/ for Phase 3")
+    ap.add_argument("--moves", default="", help="optimiser output folder under outputs/ for the bus-changes sheet")
     ap.add_argument("--names", action="store_true",
-                    help="list children by name on the Phase 3 sheet (internal copy only)")
+                    help="list children by name on the bus-changes sheet (internal copy only)")
     ap.add_argument("--out", default=str(ROOT / "outputs" / "handover" / "Route sheets.xlsx"))
     a = ap.parse_args()
     pilot = {int(x) for x in a.pilot.split(",") if x.strip()}
@@ -315,7 +315,7 @@ def main() -> int:
         ws["A2"] = ("Planned times: the new order from the planner, run at the pace this bus really drives today "
                     "(GPS timetable). Mornings reach school when they do today (at least 5 min before reporting), "
                     "so most pickups move later; afternoons leave school as today. Highlighted stops move in the "
-                    "order. The didi logs every pilot run on the Bus GPS app so the times can be corrected after week 1.")
+                    "order. The didi logs every pilot run on the Bus GPS app so the times can be corrected after the first week.")
         ws["A2"].alignment = Alignment(wrap_text=True)
         ws.merge_cells("A2:G2")
         ws.row_dimensions[2].height = 48
@@ -344,7 +344,7 @@ def main() -> int:
         widths(ws, [7, 46, 8, 7, 14, 14, 30])
         setup_print(ws)
 
-    # ---------------- Phase 3 bus changes ----------------
+    # ---------------- bus changes (studied) ----------------
     if a.moves:
         mdir = ROOT / "outputs" / a.moves
         moves = pd.read_csv(mdir / "stop_moves.csv", encoding="utf-8-sig")
@@ -355,8 +355,8 @@ def main() -> int:
             roster = ts.parse_roster(ROOT / "inputs" / "Route Wise Student list (for council).xlsx",
                                      id_pattern=getattr(ts, "STAFF_OR_STUDENT_ID", None))
         names = roster.drop_duplicates("admission_no").set_index("admission_no")[["student_name", "grade"]]
-        ws = wb.create_sheet("Phase 3 bus changes", 3)
-        ws["A1"] = "Phase 3 (needs approval): stops that move to another bus"
+        ws = wb.create_sheet("Bus changes (studied)", 3)
+        ws["A1"] = "Stops that could move to another bus (studied, not proposed now)"
         ws["A1"].font = TITLE
         ws["A2"] = ("INTERNAL: contains children's names. Not for circulation outside the transport office."
                     if a.names else "Draft for decision. Children's names are in the transport office's internal copy.")
@@ -395,7 +395,7 @@ def main() -> int:
         ("Summary: one line per route.", None),
         ("Phase 1 changes: the stop times that change on every route. Same stops, same order, same bus.", None),
         ("Phase 2 pilot: the new stop order and planned times for the pilot routes only.", None),
-        ("Phase 3 bus changes: only if approved. The internal copy also lists the children by name.", None),
+        ("Bus changes (studied): not proposed now, for reference. The internal copy also lists the children by name.", None),
         ("Route N: the full timetable for each route after Phase 1, to print for the didi and driver.", None),
         ("", None),
         (f"Built from the planner data and the October GPS campaign. Route 23 is not running and is left out.", None),
