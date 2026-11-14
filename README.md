@@ -23,12 +23,12 @@ On the 24 routes that run today (415 children, 48 morning and afternoon runs):
 
 | | |
 |---|---|
-| Driving saved | **213 min a day**, 8.5% less drive time; 34 of 48 runs get faster, none drives further |
-| Distance saved | **109 km a day**, about 24,000 km a school year |
-| Fuel money saved | **₹4.2–5.1 lakh a year** (all-diesel to all-CNG fleet)* |
-| CO₂ avoided | **13–16 tonnes a year***|
+| Driving saved | **205 min a day**, 8.4% less drive time; 35 of 48 runs get faster, none drives further |
+| Distance saved | **101 km a day**, about 22,000 km a school year |
+| Fuel money saved | **₹3.9–4.7 lakh a year** (all-diesel to all-CNG fleet)* |
+| CO₂ avoided | **12–15 tonnes a year***|
 | Timing model error | 8.9 → **3.3 min per stop** in the morning, 12.3 → **6.3** in the afternoon, against the printed timetable (route-by-route cross-validation) |
-| Checked against GPS | Google's times matched a GPS-logged bus run to **within 3%** (41.3 vs 40.1 min) |
+| Checked against GPS | 141 runs logged by the bus staff in October 2026: the model times a whole morning run to within **about 3.5 min**, an afternoon run to within about 5 |
 
 \* Assumes 220 school days, CNG 4 km/kg at ₹85/kg, diesel 5 km/litre at ₹88/litre,
 2.7 kg CO₂ per kg CNG and 2.68 kg per litre diesel. Only distance is counted. All of
