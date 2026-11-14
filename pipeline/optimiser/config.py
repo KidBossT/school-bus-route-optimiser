@@ -32,6 +32,9 @@ class OptimiserConfig:
     # --- fleet ------------------------------------------------------------
     default_capacity: int = 40            # ASSUMPTION: seats per bus, not in any file
     capacity_by_route: dict = field(default_factory=dict)   # {"R07": 32, ...}
+    seat_fill: float = 1.0                # ASSUMPTION: share of the listed seats a plan may fill; a 3+2
+                                          # bench seats 3 small children but 2 older ones, so 51 listed
+                                          # seats are not 51 usable ones
     extra_vehicles: int = 0               # spare buses the solver may add
     closed_vehicles: list = field(default_factory=list)   # buses that keep exactly today's stops, e.g. no GPS
                                                           # to check their runs, or not known to be running
@@ -40,6 +43,8 @@ class OptimiserConfig:
     max_ride_min: float = 75.0            # ASSUMPTION: longest a child may ride ...
     never_worse_than_today: bool = True   # ... except on a bus whose run is longer today: it may keep
                                           # today's length (R3/R22 afternoons take 100+ min of road)
+    arrival_buffer_min: float = 0.0       # AM: plan every run to reach school this long before reporting
+                                          # time, so an ordinary bad-traffic day still gets children in on time
     earliest_pickup_min: float = 6 * 60   # ASSUMPTION: no pickup before 06:00
     dismissal_min: float = 14 * 60 + 50   # ASSUMPTION: buses leave school 14:50
     latest_drop_min: float = 16 * 60 + 45 # ASSUMPTION: last drop by 16:45

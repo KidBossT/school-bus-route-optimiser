@@ -247,11 +247,11 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
     fleet = sorted(students[rcol].dropna().unique())
     reserved = pd.Series([h["children"] for h in held], index=[h["bus_today"] for h in held],
                          dtype=float).groupby(level=0).sum() if held else pd.Series(dtype=float)
-    vehicles = [Vehicle(rk, int(cfg.capacity_by_route.get(rk, cfg.default_capacity)),
+    vehicles = [Vehicle(rk, int(cfg.capacity_by_route.get(rk, cfg.default_capacity) * cfg.seat_fill),
                         reserved_load=int(reserved.get(rk, 0)), closed=rk in closed or cfg.reorder_only,
                         retired=rk in retired)
                 for rk in fleet]
-    vehicles += [Vehicle(f"SPARE{i + 1}", cfg.default_capacity, existing=False)
+    vehicles += [Vehicle(f"SPARE{i + 1}", int(cfg.default_capacity * cfg.seat_fill), existing=False)
                  for i in range(cfg.extra_vehicles)]
 
     nodes = _split_oversized(nodes, max(v.capacity for v in vehicles))
@@ -301,6 +301,11 @@ def build(direction: str, routes: pd.DataFrame, students: pd.DataFrame,
                 if model else f"x{cfg.time_multiplier_am if am else cfg.time_multiplier_pm} multiplier")]
     if traffic_note:
         notes.append(traffic_note)
+    if cfg.seat_fill != 1:
+        notes.append(f"seats: a bus is planned to at most {cfg.seat_fill:.0%} of its listed seats "
+                     f"(e.g. {int(51 * cfg.seat_fill)} of 51)")
+    if am and cfg.arrival_buffer_min:
+        notes.append(f"every run is planned to reach school {cfg.arrival_buffer_min:g} min before reporting time")
     locked_rows = [r for r in readiness if r["status"] == "locked" and "kept on today's bus" in r["reason"]]
     if locked_rows:
         gps_n = sum(1 for r in locked_rows if "the GPS place" in r["reason"])

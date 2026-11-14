@@ -697,6 +697,14 @@ ASSUMPTIONS.** They are not in any source file.
   breach that no plan could fix.
 - **The school is the bus gate**: a GPS override (median of 93 run ends) 232 m
   from the geocoded school point.
+- **Real seats** (`capacity_by_route`, 29 Oct): the school's vehicle list, 20 to 51 seats
+  (RT 13 does not exist). `seat_fill` (0.85, ASSUMPTION) plans each bus to that share of
+  them: R11 runs "full" at 44 riders on 51 listed seats, since a 3+2 bench seats three small
+  children but two older ones or adults.
+- **On time first** (`arrival_buffer_min`, 5): every morning run is planned to reach school
+  that long before reporting time. GPS: buses with a logged arrival came in 0.4-16 min early,
+  the same bus varying by up to 4.5 min; R08, R11 and R21 had under a minute to spare on
+  some days. Lateness is a hard rule (`violation`), so no saving can buy it.
 - `stop_moves.csv`: one row per stop the proposal moves to another bus.
 - **Scenarios**: `--reorder-only` (nobody changes bus: the within-route gain), `--draft-all`
   (every stop movable: the ceiling), and `--retire R17,R18` (those buses off the road in both

@@ -6,17 +6,24 @@
 <title>Prometheus School — Transport, as it actually runs</title>
 <style>
 :root{
-  --bg:#f6f7f9; --panel:#fff; --ink:#14181d; --muted:#5c6672; --faint:#8a929c;
-  --line:#e2e6ea; --line2:#eef1f4;
-  --late:#c2410c; --late-bg:#fff1e7; --early:#1d4ed8; --early-bg:#eaf0ff;
-  --ok:#166534; --ok-bg:#e9f5ec; --warn:#92400e; --warn-bg:#fdf4e3;
-  --unpred:#6d28d9; --unpred-bg:#f2ecfd; --none:#64748b; --none-bg:#f1f3f5;
-  --accent:#1e3a8a;
+  /* dark, to match the route planner; @media print below switches back to light */
+  --bg:#0b1018; --panel:#131a26; --ink:#e6ebf3; --muted:#a3adbd; --faint:#7d8798;
+  --line:#263142; --line2:#1c2533;
+  --late:#ff9a5c; --late-bg:#3a2214; --early:#8ab0ff; --early-bg:#17233f;
+  --ok:#5fd38d; --ok-bg:#12291c; --warn:#f2c35b; --warn-bg:#2e2512;
+  --unpred:#c4a6ff; --unpred-bg:#241a3a; --none:#9aa6b8; --none-bg:#1d2533;
+  --accent:#7aa5ff; --on-accent:#0b1018;
+  --hover:#18212f; --th:#161e2b; --hl:#4a3b10; --rowhl:#1c2a47; --map:#1a2230;
+  --explain:#171a20; --explain-ink:#c6cedb; --live-line:#2f4a7a;
+  --warn-ink:#f0d9a8; --warn-b:#f2c35b;
+  --info-bg:#17233f; --info-ink:#c9d8f5; --info-b:#9cbcf5;
+  --good-ink:#bfe8cc; --good-b:#7fe0a3;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
+html{color-scheme:dark}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
 h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-.01em}
 a{color:var(--accent)}
@@ -35,16 +42,16 @@ header.top{background:var(--panel);border-bottom:1px solid var(--line)}
   padding-top:11px;padding-bottom:11px}
 .lagbar label{font-weight:650;font-size:13.5px;white-space:nowrap}
 .lagbar input[type=range]{flex:1 1 240px;min-width:180px;accent-color:var(--accent)}
-.lagval{font:600 15px/1 var(--mono);background:var(--accent);color:#fff;
+.lagval{font:600 15px/1 var(--mono);background:var(--accent);color:var(--on-accent);
   padding:6px 10px;border-radius:6px;min-width:64px;text-align:center}
 .lagbar .ticks{font:11px/1 var(--mono);color:var(--faint);display:flex;
   justify-content:space-between;flex:1 1 240px;min-width:180px;margin-top:-6px}
 button.why{border:1px solid var(--line);background:var(--panel);color:var(--muted);
   border-radius:6px;padding:6px 11px;font-size:12.5px;cursor:pointer}
 button.why:hover{border-color:var(--faint);color:var(--ink)}
-.explain{background:#fffdf5;border-top:1px solid var(--line)}
+.explain{background:var(--explain);border-top:1px solid var(--line)}
 .explain .wrap{padding:14px 18px 16px}
-.explain p{margin:0 0 9px;max-width:78ch;font-size:13.5px;color:#3d4650}
+.explain p{margin:0 0 9px;max-width:78ch;font-size:13.5px;color:var(--explain-ink)}
 .explain p:last-child{margin-bottom:0}
 .explain b{color:var(--ink)}
 
@@ -73,7 +80,7 @@ section[role=tabpanel][hidden]{display:none}
 .kpi .v{font:650 25px/1.1 var(--sans);letter-spacing:-.02em}
 .kpi .k{color:var(--muted);font-size:12.5px;margin-top:5px}
 .kpi .sub{color:var(--faint);font-size:11.5px;margin-top:3px}
-.kpi.live{border-color:#c8d3ea;background:linear-gradient(180deg,#fbfcff,#fff)}
+.kpi.live{border-color:var(--live-line);background:var(--panel)}
 .kpi.live .v{color:var(--accent)}
 
 /* ---------- tables ---------- */
@@ -82,10 +89,10 @@ table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line2);
   vertical-align:top}
 th{font-size:11px;text-transform:uppercase;letter-spacing:.045em;color:var(--muted);
-  font-weight:650;background:#fafbfc;position:sticky;top:0;white-space:nowrap}
+  font-weight:650;background:var(--th);position:sticky;top:0;white-space:nowrap}
 td.num,th.num{text-align:right;font-family:var(--mono);font-size:12.5px;
   white-space:nowrap}
-tbody tr:hover{background:#fbfcfd}
+tbody tr:hover{background:var(--hover)}
 td.stop{min-width:190px;max-width:340px}
 .n{color:var(--faint);font-family:var(--mono);font-size:11.5px}
 
@@ -101,18 +108,18 @@ td.stop{min-width:190px;max-width:340px}
 
 /* ---------- warnings ---------- */
 .warn{border-left:3px solid #d9a441;background:var(--warn-bg);border-radius:0 7px 7px 0;
-  padding:10px 13px;margin:0 0 11px;font-size:13px;color:#5c4415}
-.warn>b:first-child{display:block;margin-bottom:2px;color:#7a5a12}
-.warn.info{border-left-color:#4a72c4;background:#eef3fd;color:#1f3763}
-.warn.info>b:first-child{color:#183055}
-.warn.good{border-left-color:#4f9d69;background:var(--ok-bg);color:#1d4b2c}
-.warn.good>b:first-child{color:#14532d}
+  padding:10px 13px;margin:0 0 11px;font-size:13px;color:var(--warn-ink)}
+.warn>b:first-child{display:block;margin-bottom:2px;color:var(--warn-b)}
+.warn.info{border-left-color:#4a72c4;background:var(--info-bg);color:var(--info-ink)}
+.warn.info>b:first-child{color:var(--info-b)}
+.warn.good{border-left-color:#4f9d69;background:var(--ok-bg);color:var(--good-ink)}
+.warn.good>b:first-child{color:var(--good-b)}
 
 /* ---------- maps ---------- */
 #bigmap{height:min(70vh,620px);border-radius:9px;border:1px solid var(--line);
-  background:#e9edf1}
+  background:var(--map)}
 .routemap{height:290px;border-radius:8px;border:1px solid var(--line);
-  background:#e9edf1;margin-bottom:12px}
+  background:var(--map);margin-bottom:12px}
 .leaflet-container{font:13px var(--sans)}
 .mapbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 select,.seg button{font:14px var(--sans);padding:7px 10px;border:1px solid var(--line);
@@ -120,13 +127,13 @@ select,.seg button{font:14px var(--sans);padding:7px 10px;border:1px solid var(-
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .seg button{border:0;border-radius:0;cursor:pointer;color:var(--muted);font-weight:600;
   font-size:13px}
-.seg button[aria-pressed=true]{background:var(--accent);color:#fff}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--muted);
   margin-top:10px;align-items:center}
 .legend i{width:13px;height:13px;border-radius:50%;display:inline-block;
   vertical-align:-2px;margin-right:5px;border:1.5px solid #fff;
   box-shadow:0 0 0 1px rgba(0,0,0,.28)}
-.legend .dash{border-style:dashed;border-color:#111;background:#fff!important;
+.legend .dash{border-style:dashed;border-color:var(--ink);background:transparent!important;
   box-shadow:none}
 .pop b{font-size:13.5px}
 .pop table{font-size:12px;margin-top:6px}
@@ -138,7 +145,7 @@ select,.seg button{font:14px var(--sans);padding:7px 10px;border:1px solid var(-
 .route>summary{list-style:none;cursor:pointer;padding:13px 16px;display:flex;
   gap:12px;align-items:center;flex-wrap:wrap}
 .route>summary::-webkit-details-marker{display:none}
-.route>summary:hover{background:#fbfcfd}
+.route>summary:hover{background:var(--hover)}
 .route>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .route .rnum{font:650 15px var(--sans);min-width:74px}
 .route .meta{color:var(--muted);font-size:12.5px;flex:1 1 auto}
@@ -156,7 +163,7 @@ select,.seg button{font:14px var(--sans);padding:7px 10px;border:1px solid var(-
 .muted{color:var(--muted)}
 .small{font-size:12.5px}
 .mono{font-family:var(--mono)}
-.hl{background:#fff6d9;padding:0 3px;border-radius:3px}
+.hl{background:var(--hl);padding:0 3px;border-radius:3px}
 footer{color:var(--faint);font-size:12px;padding:26px 0 40px;text-align:center}
 
 @media (max-width:640px){
@@ -167,6 +174,20 @@ footer{color:var(--faint);font-size:12px;padding:26px 0 40px;text-align:center}
   #bigmap{height:56vh}
 }
 @media print{
+  :root{color-scheme:light;
+  --bg:#f6f7f9; --panel:#fff; --ink:#14181d; --muted:#5c6672; --faint:#8a929c;
+  --line:#e2e6ea; --line2:#eef1f4;
+  --late:#c2410c; --late-bg:#fff1e7; --early:#1d4ed8; --early-bg:#eaf0ff;
+  --ok:#166534; --ok-bg:#e9f5ec; --warn:#92400e; --warn-bg:#fdf4e3;
+  --unpred:#6d28d9; --unpred-bg:#f2ecfd; --none:#64748b; --none-bg:#f1f3f5;
+  --accent:#1e3a8a;
+  --on-accent:#fff;
+  --hover:#fbfcfd; --th:#fafbfc; --hl:#fff6d9; --rowhl:#eef3fd; --map:#e9edf1;
+  --explain:#fffdf5; --explain-ink:#3d4650; --live-line:#c8d3ea;
+  --warn-ink:#5c4415; --warn-b:#7a5a12;
+  --info-bg:#eef3fd; --info-ink:#1f3763; --info-b:#183055;
+  --good-ink:#1d4b2c; --good-b:#14532d;
+  }
   .lagbar,nav.tabs,.mapbar,button.why{display:none!important}
   body{background:#fff}
   .panel,.route{break-inside:avoid;border-color:#bbb}
@@ -432,7 +453,7 @@ function stopMarker(s, st, isAM, r) {
   const colour = dev === null ? "#9aa3ad" : devColour(dev);
   const m = LF.circleMarker([s.lat, s.lon], {
     radius: 6,
-    color: s.geo_verified ? "#ffffff" : "#111827",
+    color: s.geo_verified ? "#ffffff" : "#cbd5e1",
     weight: s.geo_verified ? 2 : 1.5,
     dashArray: s.geo_verified ? null : "2,2",
     fillColor: colour, fillOpacity: .92,
@@ -561,7 +582,7 @@ function renderOverview() {
       <th class="num">Routes infeasible</th></tr></thead><tbody>`;
   for (let l = C.L_MIN; l <= C.L_MAX; l++) {
     const c = fleetCounts(l);
-    h += `<tr${l === L ? ' style="background:#eef3fd;font-weight:600"' : ""}>
+    h += `<tr${l === L ? ' style="background:var(--rowhl);font-weight:600"' : ""}>
       <td class="num">${l}</td><td class="num">${c.late}</td><td class="num">${c.early}</td>
       <td class="num">${c.onTime}</td><td class="num">${c.unpred}</td>
       <td class="num">${c.infeasible}</td></tr>`;
@@ -1112,7 +1133,12 @@ document.addEventListener("DOMContentLoaded", () => {
   paint();
 });
 </script>
-<style>.seqlbl{background:none;border:0;box-shadow:none;color:#fff;font:700 10px var(--mono);
+<style>
+.gm-style .gm-style-iw-c{background:var(--panel)!important;color:var(--ink);border:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.5)!important}
+.gm-style .gm-style-iw-d{color:var(--ink)}
+.gm-style .gm-style-iw-tc::after{background:var(--panel)!important}
+.gm-style .gm-style-iw-chr button span{background-color:var(--muted)!important}
+.seqlbl{background:none;border:0;box-shadow:none;color:#fff;font:700 10px var(--mono);
   text-shadow:0 0 2px rgba(0,0,0,.9)}.seqlbl::before{display:none}</style>
 </body>
 </html>

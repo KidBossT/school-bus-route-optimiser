@@ -77,6 +77,13 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(d["end_min"], 455.0)
         self.assertEqual(etas[-1], 454.0)
 
+    def test_am_arrival_buffer_moves_the_run_earlier(self):
+        p = line_problem("am")
+        ev = Evaluator(p, cfg_plain(arrival_buffer_min=5))
+        d = ev.route_detail([1, 2, 3], 0)
+        self.assertEqual(d["end_min"], 450.0)
+        self.assertEqual(d["stops"][-1]["eta_min"], 449.0)
+
     def test_capacity_breach_is_penalised(self):
         p = line_problem(caps=(2,))
         ev = Evaluator(p, cfg_plain())

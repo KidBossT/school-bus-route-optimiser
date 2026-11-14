@@ -40,7 +40,7 @@ class Evaluator:
         c = self.cfg
         if self.p.direction == "am":
             dl = min((self.deadline[j] for j in seq), default=np.inf)
-            window = dl - c.earliest_pickup_min if np.isfinite(dl) else np.inf
+            window = dl - c.arrival_buffer_min - c.earliest_pickup_min if np.isfinite(dl) else np.inf
         else:
             window = c.latest_drop_min - c.dismissal_min - c.school_dwell_min
         limit = min(c.max_ride_min, window)
@@ -93,7 +93,7 @@ class Evaluator:
         duration = t
         if p.direction == "am":
             dl = min((self.deadline[j] for j in seq), default=np.inf)
-            arrive = dl if np.isfinite(dl) else None
+            arrive = dl - c.arrival_buffer_min if np.isfinite(dl) else None
             etas = [None if arrive is None else arrive - x for x in prefix]
             start, end = (etas[-1] if etas else None), arrive
         else:

@@ -7,6 +7,7 @@ One command regenerates everything from a fresh monthly export:
     --outputs  where the dashboard and data files are written (default: ./outputs)
     --cache    geocode and road-time caches                   (default: ./cache)
     --offline  use the caches only; make no network calls
+    --render-only  redraw dashboard.html from outputs/dashboard_data.json (no data work)
 
 The three source workbooks are matched by pattern, not by exact filename, so a
 re-issued export drops straight in. With a warm cache the whole build makes zero
@@ -39,7 +40,7 @@ def inject(template: Path, data: dict, out: Path) -> Path:
                          default=str, allow_nan=False)
     payload = payload.replace("</", "<\\/")
 
-    html = html.replace("__GMAP_TAGS__", build_data.geo.gmaps.browser_map_tags("default"))
+    html = html.replace("__GMAP_TAGS__", build_data.geo.gmaps.browser_map_tags("dark"))
     out.write_text(html.replace(PLACEHOLDER, payload), encoding="utf-8")
     return out
 
@@ -51,16 +52,23 @@ def main() -> int:
     ap.add_argument("--outputs", default=str(root / "outputs"))
     ap.add_argument("--cache", default=str(root / "cache"))
     ap.add_argument("--offline", action="store_true")
+    ap.add_argument("--render-only", action="store_true")
     a = ap.parse_args()
 
     inputs, outputs, cache = Path(a.inputs), Path(a.outputs), Path(a.cache)
+    template = Path(__file__).resolve().parent / "template.html"
+
+    if a.render_only:
+        data = json.loads((outputs / "dashboard_data.json").read_text(encoding="utf-8"))
+        html = inject(template, data, outputs / "dashboard.html")
+        print(f"  redrew {html.name} from dashboard_data.json")
+        return 0
 
     print("Building transport dashboard")
     print("-" * 74)
     res = build_data.build(inputs, outputs, cache, offline=a.offline)
     data = res["data"]
 
-    template = Path(__file__).resolve().parent / "template.html"
     html = inject(template, data, outputs / "dashboard.html")
     print(f"  wrote {html.name} ({html.stat().st_size / 1024 / 1024:.1f} MB)")
 
