@@ -151,16 +151,15 @@ def phase1_times(tt: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(out, ignore_index=True)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pilot", default="", help="pilot route numbers, e.g. 9,14,21")
-    ap.add_argument("--moves", default="", help="optimiser output folder under outputs/ for Phase 3")
-    ap.add_argument("--names", action="store_true",
-                    help="list children by name on the Phase 3 sheet (internal copy only)")
-    ap.add_argument("--out", default=str(ROOT / "outputs" / "handover" / "Route sheets.xlsx"))
-    a = ap.parse_args()
-    pilot = {int(x) for x in a.pilot.split(",") if x.strip()}
+def riders(r: dict, s: str) -> dict:
+    x = r.get(s) or {}
+    out = {p["name"]: p.get("riders") for p in x.get("points") or []}
+    out.update({p["name"]: p.get("riders") for p in x.get("missing") or []})
+    return out
 
+
+def load() -> tuple[dict, pd.DataFrame]:
+    """The running routes (planner data) and every stop's Phase 1 time."""
     data = json.loads((ROOT / "outputs" / "routes_data.json").read_text(encoding="utf-8"))
     routes = {r["num"]: r for r in data["routes"] if r["num"] not in CLOSED}
     tt = pd.read_csv(ROOT / "outputs" / "gps_timetable.csv", encoding="utf-8-sig")
@@ -186,13 +185,73 @@ def main() -> int:
                               "new time": hh, "changed": None, "runs seen": 0,
                               "note": "no GPS data - keep printed time", "sess": s, "is_changed": False})
     tt = pd.concat([tt, pd.DataFrame(extra)], ignore_index=True)
-    tt = phase1_times(tt)
+    return routes, phase1_times(tt)
 
-    def riders(r: dict, s: str) -> dict:
-        x = r.get(s) or {}
-        out = {p["name"]: p.get("riders") for p in x.get("points") or []}
-        out.update({p["name"]: p.get("riders") for p in x.get("missing") or []})
-        return out
+
+def new_order(r: dict, s: str, sub: pd.DataFrame) -> dict | None:
+    """The planner's new stop order for one run, timed at the pace the bus really drives.
+
+    None when the run keeps today's order (no plan, or it would save under MIN_SAVE min).
+    rows: new #, stop, riders, old # (today's order), Phase 1 time, planned time, note.
+    """
+    plan = ((r.get(s) or {}).get("plan") or {})
+    if not plan or (plan.get("saved_min") or 0) < MIN_SAVE:
+        return None
+    cur = {st["name"]: st["eta"] for st in plan["current"]["stops"]}
+    seq = list(dict.fromkeys(t.stop for t in sub.itertuples()))     # today's order (Phase 1 sheet)
+    p1 = {t.stop: t.final for t in sub.itertuples()}
+    # The planner's clock can run longer or shorter than the bus really does (R9 AM: 18 min
+    # longer end to end). So the new order is drawn at the real pace of today's run: k = real
+    # span / planner span over the same stops, then anchored where the bus really is today.
+    common = [n for n in cur if p1.get(n) is not None]
+    real_span = max(p1[n] for n in common) - min(p1[n] for n in common)
+    model_span = max(cur[n] for n in common) - min(cur[n] for n in common)
+    k = real_span / model_span if model_span > 1 else 1.0
+    cs, os_ = plan["current"]["school_time"], plan["optimised"]["school_time"]
+    if s == "am":   # today's real arrival, never later than reporting - 5 min
+        last = max(common, key=lambda n: cur[n])
+        arrive = min(p1[last] + k * (cs - cur[last]), r["reporting"] - BUFFER)
+        at = lambda eta: arrive - k * (os_ - eta)          # noqa: E731
+    else:           # today's real departure from school
+        first = min(common, key=lambda n: cur[n])
+        depart = p1[first] - k * (cur[first] - cs)
+        at = lambda eta: depart + k * (eta - os_)          # noqa: E731
+    rid = riders(r, s)
+    order = []
+    for st in plan["optimised"]["stops"]:
+        t_plan = at(st["eta"])
+        order.append((st["name"], t_plan, ""))
+        for nm in seq:     # roster variants "P - X D - Y" ride from / to X (am) or Y (pm)
+            if nm in cur or nm in [o[0] for o in order]:
+                continue
+            m = COMBO.match(nm)
+            if m and same_place(m.group(1 if s == "am" else 2), st["name"]):
+                order.append((nm, t_plan, "same place as the stop above"))
+    rows = []
+    for i, (nm, t_plan, note) in enumerate(order, 1):
+        rows.append({"new": i, "stop": nm, "riders": rid.get(nm, ""), "old": seq.index(nm) + 1 if nm in seq else "",
+                     "p1": p1.get(nm), "planned": math.floor(t_plan) if s == "am" else round(t_plan), "note": note})
+    placed = {o[0] for o in order}
+    for nm in seq:
+        if nm not in placed:
+            rows.append({"new": "", "stop": nm, "riders": rid.get(nm, ""), "old": seq.index(nm) + 1,
+                         "p1": p1.get(nm), "planned": None,
+                         "note": "no map pin: didi keeps it next to its usual neighbours"})
+    return {"rows": rows, "saved": plan["saved_min"] * k}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--pilot", default="", help="pilot route numbers, e.g. 9,14,21")
+    ap.add_argument("--moves", default="", help="optimiser output folder under outputs/ for Phase 3")
+    ap.add_argument("--names", action="store_true",
+                    help="list children by name on the Phase 3 sheet (internal copy only)")
+    ap.add_argument("--out", default=str(ROOT / "outputs" / "handover" / "Route sheets.xlsx"))
+    a = ap.parse_args()
+    pilot = {int(x) for x in a.pilot.split(",") if x.strip()}
+
+    routes, tt = load()
+    pilot_rows: dict[int, dict[str, pd.DataFrame]] = {}
 
     wb = Workbook()
     readme = wb.active
@@ -200,7 +259,6 @@ def main() -> int:
 
     # ---------------- per-route sheets (Phase 1) ----------------
     summary = []
-    pilot_rows: dict[int, dict[str, list]] = {}
     for num in sorted(routes):
         r = routes[num]
         ws = wb.create_sheet(f"Route {num}")
@@ -274,50 +332,13 @@ def main() -> int:
                             f"(a new order would save under {MIN_SAVE} min)").font = SUB
                     row += 2
                     continue
-                cur = {st["name"]: st["eta"] for st in plan["current"]["stops"]}
-                # today's order in the PRINTED sequence (the planner's 'current' is the GPS-driven order)
-                seq = list(dict.fromkeys(t.stop for t in sub.itertuples()))
-                p1 = {t.stop: t.final for t in sub.itertuples()}
-                # The planner's clock can run longer or shorter than the bus really does (R9 AM: 18 min
-                # longer end to end). So the new order is drawn at the real pace of today's run: k = real
-                # span / planner span over the same stops, then anchored where the bus really is today.
-                common = [n for n in cur if p1.get(n) is not None]
-                real_span = max(p1[n] for n in common) - min(p1[n] for n in common)
-                model_span = max(cur[n] for n in common) - min(cur[n] for n in common)
-                k = real_span / model_span if model_span > 1 else 1.0
-                cs, os_ = plan["current"]["school_time"], plan["optimised"]["school_time"]
-                if s == "am":   # today's real arrival, never later than reporting - 5 min
-                    last = max(common, key=lambda n: cur[n])
-                    arrive = min(p1[last] + k * (cs - cur[last]), r["reporting"] - BUFFER)
-                    at = lambda eta: arrive - k * (os_ - eta)          # noqa: E731
-                else:           # today's real departure from school
-                    first = min(common, key=lambda n: cur[n])
-                    depart = p1[first] - k * (cur[first] - cs)
-                    at = lambda eta: depart + k * (eta - os_)          # noqa: E731
-                rid = riders(r, s)
-                order = []
-                for st in plan["optimised"]["stops"]:
-                    t_plan = at(st["eta"])
-                    order.append((st["name"], t_plan, ""))
-                    for nm in seq:     # roster variants "P - X D - Y" ride from / to X (am) or Y (pm)
-                        if nm in cur or nm in [o[0] for o in order]:
-                            continue
-                        m = COMBO.match(nm)
-                        if m and same_place(m.group(1 if s == "am" else 2), st["name"]):
-                            order.append((nm, t_plan, "same place as the stop above"))
-                rows, fills = [], []
-                for i, (nm, t_plan, note) in enumerate(order, 1):
-                    old = seq.index(nm) + 1 if nm in seq else ""
-                    t_plan = math.floor(t_plan) if s == "am" else round(t_plan)
-                    rows.append([i, nm, rid.get(nm, ""), old, clock(p1.get(nm)), clock(t_plan), note])
-                    fills.append(MOVED if old != i else None)
-                for nm in seq:
-                    if nm not in [o[0] for o in order]:
-                        rows.append(["", nm, rid.get(nm, ""), seq.index(nm) + 1, clock(p1.get(nm)), "",
-                                     "no map pin: didi keeps it next to its usual neighbours"])
-                        fills.append(CHANGED)
+                res = new_order(r, s, sub)
+                rows = [[x["new"], x["stop"], x["riders"], x["old"], clock(x["p1"]), clock(x["planned"]), x["note"]]
+                        for x in res["rows"]]
+                fills = [CHANGED if x["note"].startswith("no map pin") else MOVED if x["old"] != x["new"] else None
+                         for x in res["rows"]]
                 ws.cell(row=row, column=1, value=f"Route {num} {label}: saves about "
-                        f"{plan['saved_min'] * k:.0f} min of driving").font = SUB
+                        f"{res['saved']:.0f} min of driving").font = SUB
                 row = table(ws, row + 1, ["New #", "Stop", "Riders", "Old #", "Time today (Phase 1)",
                                           "Planned pilot time", "Note"], rows, fills=fills)
         widths(ws, [7, 46, 8, 7, 14, 14, 30])
