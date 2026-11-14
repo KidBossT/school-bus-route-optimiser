@@ -131,9 +131,15 @@ def summary_md(path: Path) -> dict:
 
 
 def unsure_stops() -> pd.DataFrame:
-    """Stops the GPS could not confirm (name or place), not seen at all, or regular stops not on the list."""
+    """Stops still unconfirmed: the GPS never timed the bus standing still there.
+
+    A stop where the logger timed the bus standing still (a dwell) on any run counts as confirmed, even
+    if its name or pin was in doubt; what is left are stops the bus was never seen stopping at.
+    """
     g = pd.read_csv(ROOT / "outputs" / "gps_stops.csv", encoding="utf-8-sig")
     g = g[~g["route"].isin(bh.CLOSED)]
+    still = g[g["dwell (s)"].fillna(0) > 0].set_index(["route", "stop"]).index
+    g = g[~g.set_index(["route", "stop"]).index.isin(still)]
     unsure = g[(g["name confidence"] == "low") | (g["location confidence"] == "low") | g["status"].str.startswith("NOT SEEN")
                | g["stop"].str.startswith("(GPS stop")]
     unsure = unsure.assign(why=unsure["what to check"].fillna(unsure["status"]))
@@ -176,21 +182,12 @@ def pdf1(routes: dict, tt: pd.DataFrame) -> str:
 
     b += "<h2>2. Plan and dates</h2>"
     b += table(["Phase", "What changes", "When", "Needs"], [
-        ["1. Corrected timetable", "Every route: same stops, order and bus; only the times change (section 6, column Corrected)",
+        ["1. Corrected timetable", "Every route: same stops, order and bus; only the times change (section 5, column Corrected)",
          "Mon 30 Nov", "Go-ahead; parent notice by Mon 23 Nov"],
-        ["2. New stop order", "Same stops and bus, new order (section 6, column New order). Pilot on Routes 9, 14 (afternoon) and 21 first",
+        ["2. New stop order", "Same stops and bus, new order (section 5, column New order). Pilot on Routes 9, 14 (afternoon) and 21 first",
          "Pilot 30 Nov to 4 Dec, review Wed 9 Dec, other routes from January", "Go-ahead; didis log GPS in the pilot week"],
         ["3. Bus changes", "Stops in section 4 move bus", "After the pilot review", "Seat count on Route 11; decision"],
     ])
-    b += "<h3>Decisions needed</h3><ol>" + "".join(f"<li>{x}</li>" for x in [
-        "Approve the Phase 1 timetable from Monday 30 November.",
-        "Approve the one-week pilot of the new order on Routes 9, 14 and 21 from the same day.",
-        "Name one person in the transport office who owns the timetable.",
-        "Send the parent notice by Monday 23 November.",
-        "Count the seats on Route 11; confirm the 75 min longest ride, 6:00 earliest pickup and 4:45 last drop.",
-        "Decide whether to keep studying the 2-bus option after the pilot.",
-    ]) + "</ol>"
-
     b += "<h2>3. How to read the route pages</h2><ul>"
     b += ("<li><b>Today #</b>: position in today's order. <b>New #</b>: position in the new order. Green rows move.</li>"
           "<li><b>Printed</b>: the current timetable. <b>Corrected</b>: Phase 1 time (orange = changed). "
@@ -226,20 +223,10 @@ def pdf1(routes: dict, tt: pd.DataFrame) -> str:
                      f"{int(k.bus_today[1:])} to {int(k.bus_proposed[1:])}", f"{k.printed_time} to {k.proposed_time}"])
     b += table(["Name", "Grade", "ID", "Session", "Stop", "Route", "Time"], rows)
 
-    # ---- section 5: stops to confirm
-    unsure = unsure_stops()
-    b += "<h2 style='break-before:page'>5. Stops to confirm with the didis</h2>"
-    b += (f"<p>{len(unsure)} stops where the GPS could not confirm the name or the place, plus regular stops the bus "
-          "made that are not on the list. These keep their printed time unless the whole bus is off. "
-          "The transport office checks each one with the didi and corrects the list.</p>")
-    b += table(["Route", "Stop", "Session", "What to check"],
-               [[r.route, r.stop, r.sessions.replace("am", "morning").replace("pm", "afternoon"), r.why]
-                for r in unsure.itertuples()])
-
-    # ---- section 6: every route
+    # ---- section 5: every route
     for k_, num in enumerate(sorted(routes)):
         r = routes[num]
-        b += "<div class=route>" + ("<h2 class=sec>6. Final routes</h2>" if k_ == 0 else "")
+        b += "<div class=route>" + ("<h2 class=sec>5. Final routes</h2>" if k_ == 0 else "")
         b += f"<h2>Route {num}{'<span class=tag>PILOT</span>' if num in PILOT else ''}</h2>"
         rk = f"R{num:02d}"
         b += (f"<div class=meta>Reporting {bh.clock(r['reporting'])} &middot; {r['children']} riders listed &middot; "
@@ -272,6 +259,15 @@ def pdf1(routes: dict, tt: pd.DataFrame) -> str:
             b += table(["New #", "Today #", "Stop", "Riders", "Printed", "Corrected", "New order"], rows,
                        num={0, 1, 3}, classes=cls) + "</div>"
         b += "</div>"
+    # ---- section 6: stops not yet confirmed (last: not needed for this rollout)
+    unsure = unsure_stops()
+    b += "<h2 style='break-before:page'>6. Stops to confirm</h2>"
+    b += (f"<p><b>Not essential right now:</b> no major reordering is done, so these stops keep their place and their "
+          f"printed time. {len(unsure)} listed stops where the GPS never timed the bus standing still (any stop where it "
+          "did counts as confirmed). Check them when the route list is next updated.</p>")
+    b += table(["Route", "Stop", "Session", "What the GPS showed"],
+               [[r.route, r.stop, r.sessions.replace("am", "morning").replace("pm", "afternoon"), r.why]
+                for r in unsure.itertuples()])
     return page("Final outcome and routes", b)
 
 
@@ -343,7 +339,8 @@ def pdf2(routes: dict, tt: pd.DataFrame) -> str:
     for x in [
         "GPS covers 4 school days in October (afternoons 3, one of them an early dismissal). Winter fog and exam days will change times; "
         "a second GPS week in January rechecks every route.",
-        f"{len(unsure_stops())} stops still need confirming with the didis (outcome document, section 5).",
+        f"{len(unsure_stops())} listed stops were never timed by the GPS with the bus standing still; they keep their "
+        "place and printed time (outcome document, section 6). Not needed for this rollout.",
         "Route 6 sent no GPS data, so its times stay as printed. Route 23 is not running.",
         "The 75 min ride limit, 6:00 earliest pickup, 4:45 last drop and 85% seat fill are assumptions to confirm.",
         "Fuel and CO2 count distance only (CNG 4 km/kg at Rs 85, diesel 5 km/litre at Rs 88, 220 school days).",
