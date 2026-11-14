@@ -567,9 +567,13 @@ function renderFleet() {
     const a = r.am.plan, p = r.pm.plan;
     return { i, r, a, p, tot: (a ? a.saved_min : 0) + (p ? p.saved_min : 0) };
   }).sort((x, y) => y.tot - x.tot);
+  // routes no bus runs this term are drawn but not counted (and listed last)
+  const live = x => x.r.running !== false;
+  rows.sort((x, y) => live(y) - live(x));
   let cur = 0, opt = 0, kmc = 0, kmo = 0;
-  rows.forEach(x => [x.a, x.p].forEach(q => { if (q) { cur += q.current.drive_min; opt += q.optimised.drive_min; kmc += q.current.km; kmo += q.optimised.km; } }));
-  $("brandsub").textContent = `${DATA.routes.length} routes · both runs each school day`;
+  rows.filter(live).forEach(x => [x.a, x.p].forEach(q => { if (q) { cur += q.current.drive_min; opt += q.optimised.drive_min; kmc += q.current.km; kmo += q.optimised.km; } }));
+  const nLive = rows.filter(live).length;
+  $("brandsub").textContent = `${nLive} running routes · both runs each school day`;
   $("stats").innerHTML = `
     <div class="stat save"><div class="v">${Math.round(cur - opt)}<small>min</small></div><div class="k">saved per day</div></div>
     <div class="stat"><div class="v">${Math.round(kmc - kmo)}<small>km</small></div><div class="k">less driving per day</div></div>
@@ -583,8 +587,8 @@ function renderFleet() {
   const cell = q => q ? `<b>${Math.round(q.current.drive_min)}→${Math.round(q.optimised.drive_min)}</b>` : "—";
   let h = fuelCard(kmc - kmo) + `<div class="fhead"><span>Route</span><span>Morning min</span><span>Afternoon min</span><span style="text-align:right">Saved</span></div>`;
   rows.forEach(x => h += `<div class="frow" data-r="${x.i}"><div class="rt">${x.r.route.replace("Route ", "R")}<small>${kids(x.r.children)}</small></div>
-    <div class="ss">${cell(x.a)}</div><div class="ss">${cell(x.p)}</div><div class="tot">${x.tot > 0.5 ? "−" + Math.round(x.tot) : "0"}</div></div>`);
-  h += `<div class="sub" style="padding:10px 8px;color:var(--muted);font-size:11px">Minutes are calibrated drive time per trip, old route → new route. Click a route to compare it.</div>`;
+    <div class="ss">${cell(x.a)}</div><div class="ss">${cell(x.p)}</div><div class="tot">${!live(x) ? "not running" : x.tot > 0.5 ? "−" + Math.round(x.tot) : "0"}</div></div>`);
+  h += `<div class="sub" style="padding:10px 8px;color:var(--muted);font-size:11px">Minutes are calibrated drive time per trip, old route → new route. Click a route to compare it.${rows.some(x => !live(x)) ? " Routes marked not running are on the timetable but no bus runs them this term, so they are left out of the totals." : ""}</div>`;
   $("list").className = "scroll"; $("list").innerHTML = h;
   bindFuel(kmc - kmo);
   $("list").querySelectorAll("[data-r]").forEach(el => {

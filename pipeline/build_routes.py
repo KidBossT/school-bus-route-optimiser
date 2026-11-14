@@ -831,8 +831,15 @@ def build(inputs: Path, outputs: Path, cache_dir: Path, offline: bool = False,
     return render(data, outputs / "routes.html")
 
 
+# Routes on the timetable that no bus runs this term (R23: no taps after 27 Aug, no GPS in the
+# October campaign). The planner still draws them but leaves them out of the Fleet totals.
+NOT_RUNNING = {23}
+
+
 def render(data: dict, html: Path) -> Path:
     """Write the planner page for `data` (the routes_data.json contents)."""
+    for r in data["routes"]:
+        r["running"] = r["num"] not in NOT_RUNNING
     tpl = (Path(__file__).resolve().parent / "routes_template.html").read_text(encoding="utf-8")
     payload = json.dumps(data, separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
     html.parent.mkdir(parents=True, exist_ok=True)
